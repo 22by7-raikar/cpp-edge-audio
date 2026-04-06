@@ -1,0 +1,29 @@
+# C++ build artifacts
+runtime/cpp/build/
+*.o
+*.a
+*.so
+
+# Model files
+*.bin
+*.gguf
+*.pt
+*.onnx
+
+# Test/benchmark audio data
+data/
+
+# Benchmark results (keep configs, gitignore raw output logs)
+benchmarks/results/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+tools/python/edge_stt/
+
+# Editor / OS
+.DS_Store
+.vscode/settings.json
+*.swp
