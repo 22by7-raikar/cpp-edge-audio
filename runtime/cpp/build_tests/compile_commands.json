@@ -1,0 +1,127 @@
+[
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/cc -DGGML_BACKEND_BUILD -DGGML_BACKEND_SHARED -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_USE_CPU_REPACK -DGGML_USE_OPENMP -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_cpu_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/.. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wshadow -Wstrict-prototypes -Wpointer-arith -Wmissing-prototypes -Werror=implicit-int -Werror=implicit-function-declaration -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wdouble-promotion -march=native -fopenmp -std=gnu11 -o CMakeFiles/ggml-cpu.dir/ggml-cpu/ggml-cpu.c.o   -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/ggml-cpu.c",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/ggml-cpu.c"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BACKEND_BUILD -DGGML_BACKEND_SHARED -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_USE_CPU_REPACK -DGGML_USE_OPENMP -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_cpu_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/.. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -march=native -fopenmp -std=gnu++17 -o CMakeFiles/ggml-cpu.dir/ggml-cpu/ggml-cpu.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/ggml-cpu.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/ggml-cpu.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BACKEND_BUILD -DGGML_BACKEND_SHARED -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_USE_CPU_REPACK -DGGML_USE_OPENMP -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_cpu_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/.. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -march=native -fopenmp -std=gnu++17 -o CMakeFiles/ggml-cpu.dir/ggml-cpu/repack.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/repack.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/repack.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BACKEND_BUILD -DGGML_BACKEND_SHARED -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_USE_CPU_REPACK -DGGML_USE_OPENMP -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_cpu_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/.. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -march=native -fopenmp -std=gnu++17 -o CMakeFiles/ggml-cpu.dir/ggml-cpu/hbm.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/hbm.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/hbm.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/cc -DGGML_BACKEND_BUILD -DGGML_BACKEND_SHARED -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_USE_CPU_REPACK -DGGML_USE_OPENMP -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_cpu_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/.. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wshadow -Wstrict-prototypes -Wpointer-arith -Wmissing-prototypes -Werror=implicit-int -Werror=implicit-function-declaration -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wdouble-promotion -march=native -fopenmp -std=gnu11 -o CMakeFiles/ggml-cpu.dir/ggml-cpu/quants.c.o   -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/quants.c",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/quants.c"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BACKEND_BUILD -DGGML_BACKEND_SHARED -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_USE_CPU_REPACK -DGGML_USE_OPENMP -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_cpu_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/.. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -march=native -fopenmp -std=gnu++17 -o CMakeFiles/ggml-cpu.dir/ggml-cpu/traits.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/traits.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/traits.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BACKEND_BUILD -DGGML_BACKEND_SHARED -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_USE_CPU_REPACK -DGGML_USE_OPENMP -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_cpu_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/.. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -march=native -fopenmp -std=gnu++17 -o CMakeFiles/ggml-cpu.dir/ggml-cpu/amx/amx.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/amx/amx.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/amx/amx.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BACKEND_BUILD -DGGML_BACKEND_SHARED -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_USE_CPU_REPACK -DGGML_USE_OPENMP -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_cpu_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/.. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -march=native -fopenmp -std=gnu++17 -o CMakeFiles/ggml-cpu.dir/ggml-cpu/amx/mmq.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/amx/mmq.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/amx/mmq.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BACKEND_BUILD -DGGML_BACKEND_SHARED -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_USE_CPU_REPACK -DGGML_USE_OPENMP -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_cpu_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/.. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -march=native -fopenmp -std=gnu++17 -o CMakeFiles/ggml-cpu.dir/ggml-cpu/binary-ops.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/binary-ops.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/binary-ops.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BACKEND_BUILD -DGGML_BACKEND_SHARED -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_USE_CPU_REPACK -DGGML_USE_OPENMP -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_cpu_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/.. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -march=native -fopenmp -std=gnu++17 -o CMakeFiles/ggml-cpu.dir/ggml-cpu/unary-ops.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/unary-ops.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/unary-ops.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BACKEND_BUILD -DGGML_BACKEND_SHARED -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_USE_CPU_REPACK -DGGML_USE_OPENMP -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_cpu_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/.. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -march=native -fopenmp -std=gnu++17 -o CMakeFiles/ggml-cpu.dir/ggml-cpu/vec.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/vec.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/vec.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BACKEND_BUILD -DGGML_BACKEND_SHARED -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_USE_CPU_REPACK -DGGML_USE_OPENMP -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_cpu_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/.. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -march=native -fopenmp -std=gnu++17 -o CMakeFiles/ggml-cpu.dir/ggml-cpu/ops.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/ops.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/ops.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/cc -DGGML_BACKEND_BUILD -DGGML_BACKEND_SHARED -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_USE_CPU_REPACK -DGGML_USE_OPENMP -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_cpu_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/.. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wshadow -Wstrict-prototypes -Wpointer-arith -Wmissing-prototypes -Werror=implicit-int -Werror=implicit-function-declaration -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wdouble-promotion -march=native -fopenmp -std=gnu11 -o CMakeFiles/ggml-cpu.dir/ggml-cpu/arch/x86/quants.c.o   -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/arch/x86/quants.c",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/arch/x86/quants.c"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BACKEND_BUILD -DGGML_BACKEND_SHARED -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_USE_CPU_REPACK -DGGML_USE_OPENMP -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_cpu_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/.. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -march=native -fopenmp -std=gnu++17 -o CMakeFiles/ggml-cpu.dir/ggml-cpu/arch/x86/repack.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BACKEND_SHARED -DGGML_BUILD -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_USE_CPU -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -std=gnu++17 -o CMakeFiles/ggml.dir/ggml-backend-dl.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-backend-dl.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-backend-dl.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BACKEND_SHARED -DGGML_BUILD -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_USE_CPU -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -std=gnu++17 -o CMakeFiles/ggml.dir/ggml-backend-reg.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-backend-reg.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-backend-reg.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/cc -DGGML_BUILD -DGGML_COMMIT=\\\"95ea8f9\\\" -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_VERSION=\\\"0.9.8\\\" -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_base_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wshadow -Wstrict-prototypes -Wpointer-arith -Wmissing-prototypes -Werror=implicit-int -Werror=implicit-function-declaration -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wdouble-promotion -pthread -std=gnu11 -o CMakeFiles/ggml-base.dir/ggml.c.o   -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml.c",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml.c"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BUILD -DGGML_COMMIT=\\\"95ea8f9\\\" -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_VERSION=\\\"0.9.8\\\" -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_base_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -pthread -std=gnu++17 -o CMakeFiles/ggml-base.dir/ggml.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/cc -DGGML_BUILD -DGGML_COMMIT=\\\"95ea8f9\\\" -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_VERSION=\\\"0.9.8\\\" -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_base_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wshadow -Wstrict-prototypes -Wpointer-arith -Wmissing-prototypes -Werror=implicit-int -Werror=implicit-function-declaration -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wdouble-promotion -pthread -std=gnu11 -o CMakeFiles/ggml-base.dir/ggml-alloc.c.o   -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-alloc.c",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-alloc.c"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BUILD -DGGML_COMMIT=\\\"95ea8f9\\\" -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_VERSION=\\\"0.9.8\\\" -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_base_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -pthread -std=gnu++17 -o CMakeFiles/ggml-base.dir/ggml-backend.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-backend.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-backend.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BUILD -DGGML_COMMIT=\\\"95ea8f9\\\" -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_VERSION=\\\"0.9.8\\\" -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_base_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -pthread -std=gnu++17 -o CMakeFiles/ggml-base.dir/ggml-opt.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-opt.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-opt.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BUILD -DGGML_COMMIT=\\\"95ea8f9\\\" -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_VERSION=\\\"0.9.8\\\" -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_base_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -pthread -std=gnu++17 -o CMakeFiles/ggml-base.dir/ggml-threading.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-threading.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-threading.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/cc -DGGML_BUILD -DGGML_COMMIT=\\\"95ea8f9\\\" -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_VERSION=\\\"0.9.8\\\" -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_base_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wshadow -Wstrict-prototypes -Wpointer-arith -Wmissing-prototypes -Werror=implicit-int -Werror=implicit-function-declaration -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wdouble-promotion -pthread -std=gnu11 -o CMakeFiles/ggml-base.dir/ggml-quants.c.o   -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-quants.c",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/ggml-quants.c"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src",
+  "command": "/usr/bin/c++  -DGGML_BUILD -DGGML_COMMIT=\\\"95ea8f9\\\" -DGGML_SCHED_MAX_COPIES=4 -DGGML_SHARED -DGGML_VERSION=\\\"0.9.8\\\" -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -Dggml_base_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -Wno-array-bounds -Wextra-semi -pthread -std=gnu++17 -o CMakeFiles/ggml-base.dir/gguf.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/gguf.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/gguf.cpp"
+},
+{
+  "directory": "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/src",
+  "command": "/usr/bin/c++  -DGGML_BACKEND_SHARED -DGGML_SHARED -DGGML_USE_CPU -DWHISPER_BUILD -DWHISPER_SHARED -DWHISPER_VERSION=\\\"1.8.4\\\" -Dwhisper_EXPORTS -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/src/. -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/src/../include -I/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/ggml/src/../include  -O3 -DNDEBUG -fPIC   -Wmissing-declarations -Wmissing-noreturn -Wall -Wextra -Wpedantic -Wcast-qual -Wno-unused-function -pthread -std=gnu++17 -o CMakeFiles/whisper.dir/whisper.cpp.o -c /home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/src/whisper.cpp",
+  "file": "/home/apr/Personal/cpp-edge-audio/vendor/whisper.cpp/src/whisper.cpp"
+}
+]

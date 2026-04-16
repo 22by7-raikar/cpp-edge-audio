@@ -1,83 +1,62 @@
 # Repository-wide Copilot instructions
 
-This repository is for a Linux-first, C++-focused, deployment-oriented audio ML project.
+## Project identity
+Linux-first, C++-focused, deployment-oriented audio ML/STT pipeline.
+ASR backend: whisper.cpp (git submodule at vendor/whisper.cpp).
+Python is support tooling only (tools/python/).
 
-Current project priority:
-- Build the core runtime on Ubuntu/Linux first
-- Use whisper.cpp as the ASR backend
-- Focus on C++ runtime engineering, inference optimization, deployment structure, and benchmarking
-- Keep Python limited to support tooling, offline analysis, evaluation, plotting, and utilities
-- Do not prioritize iOS, Swift, Xcode, or macOS-specific work unless explicitly requested
+## Teaching-first behavior
+- Generate one small, coherent patch at a time unless the user explicitly asks for multi-file generation.
+- Explain what each change does and why, briefly and technically.
+- Prefer readable, traceable code over clever brevity.
+- Do not silently make decisions that would affect benchmarks or deployed behavior.
 
-Core project goals:
-- audio ingestion from files and microphone
-- chunking and segmentation
-- lightweight pre-ASR gating
-- FFT/audio-feature-based quality filtering
-- Whisper-based transcription
-- structured logging and benchmarking
-- optional later extensions such as scene/context classification and adaptive inference control
+## Architecture constraints
+- Main runtime: runtime/cpp/ — C++17, CMake, no heavy external libraries beyond whisper.cpp.
+- Python: tools/python/ — offline analysis, eval, tuning, packaging only.
+- No iOS, Swift, Xcode, macOS-specific code.
+- No diarization, source separation, emotion recognition, or GUI.
+- No cloud-first or server-side inference paths.
+- whisper.cpp remains the ASR backend unless explicitly told otherwise.
 
-Code generation rules:
-- Keep code modular, small, and runnable
-- Do not invent fake APIs
-- Do not create large speculative abstractions
-- Generate only the files needed for the current milestone
-- Prefer incremental implementation over full-project scaffolding
-- Maintain bit allignment and memory safety in C++
+## Code generation rules
+- Read existing files before editing them.
+- One path change at a time — do not refactor unrelated code in the same patch.
+- Do not invent APIs; verify signatures actually exist before calling them.
+- Do not add speculative abstractions, helpers, or layers for one-off operations.
+- Maintain C++ memory safety and correct alignment.
+- When adding features to gate/chunker/scene/adaptive/logger — add a test in the same patch.
 
-Style rules:
-- Never use emojis anywhere
-- Do not create extra markdown docs unless explicitly requested
-- Do not add decorative formatting
-- Keep comments concise and practical
-- Keep explanations short and technical
+## Log schema compatibility
+- The TSV and JSON log schema is consumed by tools/python/eval/*.py and tuning/sweep_thresholds.py.
+- Do not add, rename, or remove log fields without updating all Python readers in the same patch.
+- Additive JSON fields are safe. Removals and renames are breaking changes.
+- Stable reason strings: rms_too_low, high_silence_ratio, high_clipping_ratio,
+  stationary_noise_like, low_active_frame_fraction, weak_mid_band_speech_presence,
+  excessive_high_band_energy, borderline_low_energy, borderline_noisy_speech, ok.
 
-Architecture rules:
-- Main runtime should become C++ as soon as practical
-- Python is not the main runtime
-- Separate audio I/O, chunking, feature extraction, gate logic, ASR wrapper, and logging
-- Start with a non-learned, interpretable gate before any learned gate
-- Design for benchmarkability and deployment
-- Preserve a path to future optional side-models, but do not prioritize them now
+## Gate
+- Interpretable, rule-based DSP gate. No ML in the gate yet.
+- Returns PASS / FAIL / BORDERLINE with a reason string and GateMetrics struct.
+- Features used: rms, silence_ratio, clipping_ratio, zcr, spectral_flatness,
+  spectral_centroid, spectral_rolloff, spectral_flux, band_energy_low/mid/high, active_frame_frac.
+- Keep defaults conservative. Prefer BORDERLINE over false FAILs on borderline speech.
 
-Gate requirements:
-The gate should be lightweight and interpretable.
-Features to support now or soon:
-- chunk duration
-- RMS energy
-- silence ratio
-- clipping ratio
-- zero-crossing rate
-- spectral flatness
-- spectral centroid
-- spectral rolloff
-- spectral flux
-- normalized band-energy ratios
+## Benchmarking
+- Treat benchmarking as a first-class feature.
+- Always keep: model variant, thread count, chunk size, gate on/off, latency, RTF, accept rate.
 
-Gate outputs:
-- PASS
-- FAIL
-- BORDERLINE
-- reason string
-- metrics struct
+## Style
+- No emojis anywhere.
+- No extra markdown docs unless explicitly requested.
+- No decorative formatting.
+- Short, technical comments.
 
-Benchmarking rules:
-Treat benchmarking as a first-class feature.
-Make it easy to compare:
-- model variant
-- quantization setting if applicable
-- thread count
-- chunk size
-- gate enabled vs disabled
-- latency
-- real-time factor
-- acceptance/rejection rate
-
-Strict non-goals right now:
-- no iOS app work
-- no SwiftUI
-- no Xcode integration
+## Strict non-goals
+- No iOS, SwiftUI, Xcode.
+- No ML gate yet.
+- No microphone path until explicitly requested.
+- No GUI, no cloud backend.
 - no cloud-first implementation
 - no diarization
 - no speaker separation

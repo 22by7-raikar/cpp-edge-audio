@@ -39,7 +39,28 @@ FEATURES = [
     ("band_low",        "Band energy low    [0-500 Hz, normalized]"),
     ("band_mid",        "Band energy mid    [500-4000 Hz, normalized]"),
     ("band_high",       "Band energy high   [4000+ Hz, normalized]"),
+    ("flux",            "Spectral flux      [mean frame-to-frame diff]"),
 ]
+
+# Human-readable descriptions for reason strings from gate v2.
+# Update this map when reason strings in gate.cpp change.
+REASON_DESCRIPTIONS = {
+    "rms_too_low":                    "Audio essentially silent (RMS below hard floor)",
+    "high_silence_ratio":             "Too many silent samples in chunk",
+    "high_clipping_ratio":            "Severe clipping / ADC saturation",
+    "low_active_frame_fraction":      "Almost no active FFT frames",
+    "stationary_noise_like":          "High spectral flatness [+high ZCR] -> noise",
+    "weak_mid_band_speech_presence":  "Spectrum lacks mid-band (500-4000 Hz) voice energy",
+    "excessive_high_band_energy":     "Spectrum dominated by high-frequency hiss/noise",
+    "borderline_low_energy":          "Low RMS, above hard floor but below speech target",
+    "borderline_noisy_speech":        "Moderate flatness: could be speech in noise",
+    "ok":                             "Passed all checks",
+    "gate_disabled":                  "Gate was disabled for this run",
+    # Legacy reason strings from gate v1 (kept for backward compat with old logs)
+    "low_rms":                        "[v1] Low RMS (see borderline_low_energy)",
+    "high_spectral_flatness":         "[v1] High flatness (see stationary_noise_like)",
+    "elevated_flatness":              "[v1] Elevated flatness (see borderline_noisy_speech)",
+}
 
 DECISIONS = ["PASS", "BORDERLINE", "FAIL"]
 
@@ -115,7 +136,9 @@ def analyze(path: str, ref_map: Dict[int, str]):
     if reason_counts:
         print(f"\nRejection reasons:")
         for reason, count in sorted(reason_counts.items(), key=lambda x: -x[1]):
-            print(f"  {reason:<28} {count:4d}")
+            desc = REASON_DESCRIPTIONS.get(reason, "")
+            desc_str = f"  # {desc}" if desc else ""
+            print(f"  {reason:<38} {count:4d}{desc_str}")
 
     # Feature statistics by decision
     print(f"\nFeature statistics by decision:")

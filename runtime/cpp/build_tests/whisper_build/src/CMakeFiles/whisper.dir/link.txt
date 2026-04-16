@@ -1,0 +1,1 @@
+/usr/bin/c++ -fPIC -O3 -DNDEBUG  -shared -Wl,-soname,libwhisper.so.1 -o libwhisper.so.1.8.4 CMakeFiles/whisper.dir/whisper.cpp.o  -Wl,-rpath,/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/whisper_build/ggml/src: ../ggml/src/libggml.so.0.9.8 ../ggml/src/libggml-cpu.so.0.9.8 ../ggml/src/libggml-base.so.0.9.8 -pthread 

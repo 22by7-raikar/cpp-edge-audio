@@ -1,0 +1,49 @@
+Start testing: Apr 15 22:59 CDT
+----------------------------------------------------------
+1/1 Testing: pipeline_unit_tests
+1/1 Test: pipeline_unit_tests
+Command: "/home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests/test_pipeline"
+Directory: /home/apr/Personal/cpp-edge-audio/runtime/cpp/build_tests
+"pipeline_unit_tests" start time: Apr 15 22:59 CDT
+Output:
+----------------------------------------------------------
+Running pipeline tests...
+
+  PASS  chunker_no_overlap
+  PASS  chunker_overlap
+  PASS  chunker_short_input
+  PASS  chunker_empty_input
+  PASS  features_silence
+  PASS  features_sine
+  PASS  features_white_noise
+  PASS  features_clipped
+  PASS  gate_silence_fails
+  PASS  gate_clipping_fails
+FAIL: /home/apr/Personal/cpp-edge-audio/runtime/cpp/tests/test_main.cpp:293  result.decision == pipeline::GateDecision::FAIL || result.decision == pipeline::GateDecision::BORDERLINE
+  FAIL  gate_noise_fails
+  PASS  gate_borderline_energy
+  PASS  gate_speech_passes
+  PASS  scene_silence
+  PASS  scene_noise
+FAIL: /home/apr/Personal/cpp-edge-audio/runtime/cpp/tests/test_main.cpp:391  r.label == pipeline::SceneLabel::SPEECH || r.label == pipeline::SceneLabel::MIXED_SPEECH_NOISE
+  FAIL  scene_speech
+  PASS  adaptive_history_bounded
+  PASS  adaptive_dominant_scene
+  PASS  adaptive_noise_tightens
+  PASS  adaptive_skip_asr_music
+  PASS  adaptive_skip_asr_silence
+event=run_start	input=test.wav	model=model.bin	chunk_ms=5000	hop_ms=0	threads=4	gate=1
+event=chunk	idx=0	start=0.0000	end=5.0000	dur=5.0000	decision=PASS	reason=ok	rms=0.0100	silence=0.0500	clip=0.0000	zcr=80.0	flatness=0.2000	centroid=1200.0	rolloff=3000.0	flux=0.0010	bl=0.2000	bm=0.5500	bh=0.2500	active=0.8000	scene=SPEECH	infer_ms=120.0	text=test transcription
+event=run_end	total_chunks=1	passed=1	borderline=0	failed=0	accept_rate=1.000	audio_sec=5.000	infer_ms=120.000	rtf=0.024
+  PASS  logger_tsv_keys
+
+20 passed, 2 failed
+<end of output>
+Test time =   0.03 sec
+----------------------------------------------------------
+Test Failed.
+"pipeline_unit_tests" end time: Apr 15 22:59 CDT
+"pipeline_unit_tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Apr 15 22:59 CDT

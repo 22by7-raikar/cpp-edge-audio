@@ -51,18 +51,35 @@ def simulate_gate(chunk: Dict,
                   flatness_max: float,
                   silence_max: float = 0.95,
                   clip_max: float = 0.05,
-                  rms_borderline: Optional[float] = None) -> str:
+                  rms_borderline: Optional[float] = None,
+                  min_active_frac: float = 0.10,
+                  min_band_mid: float = 0.10,
+                  max_band_high: float = 0.70,
+                  zcr_max_noise: float = 400.0,
+                  flatness_warn: Optional[float] = None) -> str:
     """
-    Apply threshold rules to stored chunk metrics and return simulated decision.
-    Mirrors the logic in gate.cpp without needing the C++ binary.
+    Simulate gate v2 decision from stored chunk metrics.
+    Must mirror the logic in gate.cpp evaluate_chunk() exactly.
+
+    Stable reason strings:
+      rms_too_low, high_silence_ratio, high_clipping_ratio,
+      low_active_frame_fraction, stationary_noise_like,
+      weak_mid_band_speech_presence, excessive_high_band_energy,
+      borderline_low_energy, borderline_noisy_speech, ok
     """
     if rms_borderline is None:
         rms_borderline = rms_min * 0.33
+    if flatness_warn is None:
+        flatness_warn = flatness_max * 0.80
 
-    rms = chunk.get("rms", 0.0)
-    silence = chunk.get("silence_ratio", 0.0)
-    clip = chunk.get("clipping_ratio", 0.0)
-    flatness = chunk.get("flatness", 0.0)
+    rms         = chunk.get("rms", 0.0)
+    silence     = chunk.get("silence_ratio", 0.0)
+    clip        = chunk.get("clipping_ratio", 0.0)
+    flatness    = chunk.get("flatness", 0.0)
+    active_frac = chunk.get("active_frac", chunk.get("active_frame_frac", 1.0))
+    band_mid    = chunk.get("band_mid", chunk.get("band_energy_mid", 1.0))
+    band_high   = chunk.get("band_high", chunk.get("band_energy_high", 0.0))
+    zcr         = chunk.get("zcr", 0.0)
 
     if rms < rms_borderline:
         return "FAIL"
@@ -70,11 +87,19 @@ def simulate_gate(chunk: Dict,
         return "FAIL"
     if clip > clip_max:
         return "FAIL"
-    if rms < rms_min:
-        return "BORDERLINE"
+    if active_frac < min_active_frac:
+        return "FAIL"
     if flatness > flatness_max:
         return "FAIL"
-    if flatness > flatness_max * 0.833:
+    if flatness > flatness_warn and zcr > zcr_max_noise:
+        return "FAIL"
+    if band_mid < min_band_mid:
+        return "FAIL"
+    if band_high > max_band_high:
+        return "FAIL"
+    if rms < rms_min:
+        return "BORDERLINE"
+    if flatness > flatness_warn:
         return "BORDERLINE"
     return "PASS"
 

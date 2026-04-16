@@ -75,6 +75,20 @@ static GateMetrics compute_metrics(const Chunk& chunk, const GateConfig& cfg) {
 
 // -------------------------------------------------------
 // Gate decision logic
+// Ordered: cheap energy checks first, spectral checks last (FFT cost paid).
+//
+// Reason strings (stable — do not rename without updating schema.instructions.md
+// and all Python eval scripts):
+//   rms_too_low              : audio is essentially silent
+//   high_silence_ratio       : too many silent samples
+//   high_clipping_ratio      : severe clipping / ADC saturation
+//   low_active_frame_fraction: almost no active FFT frames
+//   stationary_noise_like    : high flatness [+high ZCR if extreme]
+//   weak_mid_band_speech_presence: spectrum lacks mid-band voice energy
+//   excessive_high_band_energy   : spectrum dominated by high-freq hiss/noise
+//   borderline_low_energy    : RMS just above hard floor but below speech target
+//   borderline_noisy_speech  : moderate flatness, could be speech in noise
+//   ok                       : passed all checks
 // -------------------------------------------------------
 
 GateResult evaluate_chunk(const Chunk& chunk, const GateConfig& cfg) {
@@ -82,48 +96,84 @@ GateResult evaluate_chunk(const Chunk& chunk, const GateConfig& cfg) {
     result.metrics = compute_metrics(chunk, cfg);
     const GateMetrics& m = result.metrics;
 
-    // FAIL: almost entirely silent
+    // ---- 1. Hard floor: almost entirely silent ----
     if (m.rms < cfg.rms_borderline_min) {
         result.decision = GateDecision::FAIL;
         result.reason   = "rms_too_low";
         return result;
     }
 
-    // FAIL: too many silent frames
+    // ---- 2. Too many silent samples ----
     if (m.silence_ratio > cfg.max_silence_ratio) {
         result.decision = GateDecision::FAIL;
         result.reason   = "high_silence_ratio";
         return result;
     }
 
-    // FAIL: severe clipping
+    // ---- 3. Severe clipping ----
     if (m.clipping_ratio > cfg.max_clipping_ratio) {
         result.decision = GateDecision::FAIL;
         result.reason   = "high_clipping_ratio";
         return result;
     }
 
-    // BORDERLINE: low energy but not silent
-    if (m.rms < cfg.rms_min) {
-        result.decision = GateDecision::BORDERLINE;
-        result.reason   = "low_rms";
+    // ---- 4. Almost no active FFT frames ----
+    // active_frame_frac is 0 for purely time-domain-silent chunks, but can also
+    // be near-zero for very low-level noise floors that pass the RMS floor above.
+    if (m.active_frame_frac < cfg.min_active_frame_frac) {
+        result.decision = GateDecision::FAIL;
+        result.reason   = "low_active_frame_fraction";
         return result;
     }
 
-    // FAIL: flatness dominated by stationary noise (white/pink noise, HVAC, etc.)
+    // ---- 5. Stationary noise: high spectral flatness ----
+    // Flatness near 1.0 = white/pink noise; near 0 = tonal/speech.
+    // Strengthen rejection further if ZCR is also abnormally high (noise-like).
     if (m.spectral_flatness > cfg.spectral_flatness_max) {
         result.decision = GateDecision::FAIL;
-        result.reason   = "high_spectral_flatness";
+        result.reason   = "stationary_noise_like";
+        return result;
+    }
+    if (m.spectral_flatness > cfg.spectral_flatness_warn &&
+        m.zcr > cfg.zcr_max_noise) {
+        // High flatness + high ZCR together strongly indicate stationary noise.
+        result.decision = GateDecision::FAIL;
+        result.reason   = "stationary_noise_like";
         return result;
     }
 
-    // BORDERLINE: moderately elevated flatness (may be speech in noise)
+    // ---- 6. Weak mid-band speech presence ----
+    // Speech concentrates energy in 500-4000 Hz. Very low band_mid suggests
+    // content is not voice-like (HVAC hum in low-band only, or very high hiss).
+    if (m.band_energy_mid < cfg.min_band_mid) {
+        result.decision = GateDecision::FAIL;
+        result.reason   = "weak_mid_band_speech_presence";
+        return result;
+    }
+
+    // ---- 7. Excessive high-band energy ----
+    // High-frequency dominance indicates noise, hiss, or RF interference.
+    if (m.band_energy_high > cfg.max_band_high) {
+        result.decision = GateDecision::FAIL;
+        result.reason   = "excessive_high_band_energy";
+        return result;
+    }
+
+    // ---- 8. BORDERLINE: low energy, not silent ----
+    if (m.rms < cfg.rms_min) {
+        result.decision = GateDecision::BORDERLINE;
+        result.reason   = "borderline_low_energy";
+        return result;
+    }
+
+    // ---- 9. BORDERLINE: moderate flatness (possible speech in noise) ----
     if (m.spectral_flatness > cfg.spectral_flatness_warn) {
         result.decision = GateDecision::BORDERLINE;
-        result.reason   = "elevated_flatness";
+        result.reason   = "borderline_noisy_speech";
         return result;
     }
 
+    // ---- 10. All checks passed ----
     result.decision = GateDecision::PASS;
     result.reason   = "ok";
     return result;

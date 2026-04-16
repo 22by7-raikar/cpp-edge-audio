@@ -1,0 +1,10 @@
+# Put test WAV files here. This directory is gitignored.
+# For evaluation, target a range of acoustic contexts:
+#   - clean speech (studio, near-field)
+#   - speech + background noise (fan, HVAC, traffic, cafe, TV/radio)
+#   - silence / near-silence
+#   - clipped audio
+#   - short utterances, long utterances
+#   - non-speech audio (music, noise-only)
+#
+# Suggested public sources: LibriSpeech, MUSAN, DEMAND, DNS Challenge datasets.

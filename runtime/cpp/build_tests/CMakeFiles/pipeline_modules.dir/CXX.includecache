@@ -1,0 +1,44 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/apr/Personal/cpp-edge-audio/runtime/cpp/src/audio/audio_io.cpp
+dr_wav.h
+/home/apr/Personal/cpp-edge-audio/runtime/cpp/src/audio/dr_wav.h
+audio_io.h
+/home/apr/Personal/cpp-edge-audio/runtime/cpp/src/audio/audio_io.h
+algorithm
+-
+cstring
+-
+
+/home/apr/Personal/cpp-edge-audio/runtime/cpp/src/audio/audio_io.h
+string
+-
+vector
+-
+
+/home/apr/Personal/cpp-edge-audio/runtime/cpp/src/audio/dr_wav.h
+dr_wav.h
+/home/apr/Personal/cpp-edge-audio/runtime/cpp/src/audio/dr_wav.h
+stddef.h
+-
+stdlib.h
+-
+string.h
+-
+limits.h
+-
+stdio.h
+-
+wchar.h
+-
+assert.h
+-
+errno.h
+-
+

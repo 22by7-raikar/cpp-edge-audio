@@ -28,5 +28,24 @@ for cmd in cmake g++ make; do
 done
 echo "Build tools OK: cmake $(cmake --version | head -1), $(g++ --version | head -1)"
 
+# --- verify Python (optional, for tooling) ---
+if command -v python3 &>/dev/null; then
+    PY_VERSION="$(python3 --version 2>&1)"
+    echo "Python OK : $PY_VERSION"
+else
+    echo "WARNING: python3 not found. Python tooling (tools/python/) will not work."
+    echo "  Install with: sudo apt install python3"
+fi
+
+# --- verify wget (for dataset downloads) ---
+if ! command -v wget &>/dev/null; then
+    echo "WARNING: wget not found. Dataset downloads will fail."
+    echo "  Install with: sudo apt install wget"
+fi
+
 echo ""
-echo "Setup complete. Run scripts/build.sh to compile the pipeline."
+echo "Setup complete. Next steps:"
+echo "  1. bash scripts/build.sh                  # build the pipeline"
+echo "  2. bash scripts/run_tests.sh               # run unit tests (needs -DBUILD_TESTS=ON)"
+echo "  3. bash scripts/datasets/download_stage1.sh --lite   # download eval datasets"
+

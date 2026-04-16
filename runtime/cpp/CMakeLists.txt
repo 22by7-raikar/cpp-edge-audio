@@ -95,8 +95,8 @@ add_executable(audio_pipeline
 
 target_include_directories(audio_pipeline PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    # dr_wav.h lives in whisper.cpp's examples directory
-    ${WHISPER_ROOT}/examples
+    # dr_wav.h is now vendored at src/audio/dr_wav.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/audio
     ${WHISPER_ROOT}
 )
 
@@ -115,3 +115,48 @@ target_link_libraries(audio_pipeline PRIVATE Threads::Threads)
 message(STATUS "Build type   : ${CMAKE_BUILD_TYPE}")
 message(STATUS "WHISPER_ROOT : ${WHISPER_ROOT}")
 message(STATUS "Install to   : ${CMAKE_INSTALL_PREFIX}")
+
+# -------------------------------------------------------------------
+# Tests (no external framework; self-contained test runner)
+# Enable with: cmake -DBUILD_TESTS=ON ..
+# -------------------------------------------------------------------
+option(BUILD_TESTS "Build unit tests" OFF)
+
+if(BUILD_TESTS)
+    enable_testing()
+
+    # pipeline_modules: an object library so test runner can link all modules
+    # without pulling in main.cpp or whisper (ASR is not tested here).
+    add_library(pipeline_modules OBJECT
+        src/audio/audio_io.cpp
+        src/chunker/chunker.cpp
+        src/gate/features.cpp
+        src/gate/gate.cpp
+        src/scene/scene.cpp
+        src/scene/adaptive.cpp
+        src/logging/logger.cpp
+    )
+    target_include_directories(pipeline_modules PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/audio
+        ${WHISPER_ROOT}
+    )
+    # pipeline_modules does not call whisper APIs directly; asr.cpp is excluded.
+    # If a future test needs ASR, link whisper there explicitly.
+    find_library(MATH_LIB_TESTS m)
+    if(MATH_LIB_TESTS)
+        target_link_libraries(pipeline_modules PUBLIC ${MATH_LIB_TESTS})
+    endif()
+    find_package(Threads REQUIRED)
+    target_link_libraries(pipeline_modules PUBLIC Threads::Threads)
+
+    add_executable(test_pipeline tests/test_main.cpp $<TARGET_OBJECTS:pipeline_modules>)
+    target_include_directories(test_pipeline PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/audio
+        ${WHISPER_ROOT}
+    )
+    target_link_libraries(test_pipeline PRIVATE pipeline_modules)
+
+    add_test(NAME pipeline_unit_tests COMMAND test_pipeline)
+endif()

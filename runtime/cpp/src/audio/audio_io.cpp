@@ -1,5 +1,5 @@
 // audio_io.cpp
-// WAV file loading via dr_wav (public domain, ships with whisper.cpp examples).
+// WAV file loading via dr_wav (public domain single-header, vendored at src/audio/dr_wav.h).
 // Produces mono float32 PCM normalized to [-1.0, 1.0].
 
 #define DR_WAV_IMPLEMENTATION

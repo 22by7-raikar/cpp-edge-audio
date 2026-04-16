@@ -10,8 +10,23 @@ runtime/cpp/build/
 *.pt
 *.onnx
 
-# Test/benchmark audio data
-data/
+# Dataset directories — tracked by structure (.gitkeep), not content
+data/raw/*
+!data/raw/.gitkeep
+data/external/*
+!data/external/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/tmp/*
+!data/tmp/.gitkeep
+# manifests and labels are small text files — commit them
+# but ignore auto-generated chunks
+data/manifests/chunks_*.tsv
+data/labels/auto_*.tsv
+
+# Legacy ignore (pre-restructure)
+data/*.wav
+data/*.flac
 
 # Benchmark results (keep configs, gitignore raw output logs)
 benchmarks/results/
