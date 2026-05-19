@@ -10,9 +10,13 @@ runtime/cpp/build/
 *.pt
 *.onnx
 
-# Dataset directories — tracked by structure (.gitkeep), not content
+# Dataset directories — tracked by structure (.gitkeep) and symlinks, not content
 data/raw/*
 !data/raw/.gitkeep
+!data/raw/librispeech
+!data/raw/musan
+!data/raw/rirs_noises
+!data/raw/demand_16k
 data/external/*
 !data/external/.gitkeep
 data/processed/*
