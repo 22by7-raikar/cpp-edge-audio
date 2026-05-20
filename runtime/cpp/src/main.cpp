@@ -20,11 +20,13 @@
 //   --log           / -l   <path>    Write TSV log to this file in addition to stdout
 //   --bench-json    / -j   <path>    Write JSON benchmark file (per-chunk + summary)
 //   --language             <str>     Language hint for Whisper (default: en)
+//   --gate-only                      Run gate + scene only; skip ASR (--model not required)
 //
 // TODO(future): microphone capture path.
 
 #include <cstring>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -62,8 +64,9 @@ struct CliArgs {
     double      max_silence    = 0.90;
     double      max_clip       = 0.05;
     double      max_flatness   = 0.90;
-    bool        gate_enabled   = true;
-    bool        adaptive_enabled = true;
+    bool        gate_enabled     = true;
+    bool        adaptive_enabled  = true;
+    bool        gate_only         = false;  // skip ASR, model not required
 };
 
 bool parse_args(int argc, char** argv, CliArgs& out) {
@@ -92,14 +95,19 @@ bool parse_args(int argc, char** argv, CliArgs& out) {
         else if (a == "--max-flatness")             out.max_flatness = std::stod(next());
         else if (a == "--no-gate")                  out.gate_enabled = false;
         else if (a == "--no-adapt")                 out.adaptive_enabled = false;
+        else if (a == "--gate-only")                out.gate_only = true;
         else {
             std::cerr << "Unknown argument: " << a << "\n";
             return false;
         }
     }
 
-    if (out.input_path.empty() || out.model_path.empty()) {
-        std::cerr << "ERROR: --input and --model are required.\n";
+    if (out.input_path.empty()) {
+        std::cerr << "ERROR: --input is required.\n";
+        return false;
+    }
+    if (!out.gate_only && out.model_path.empty()) {
+        std::cerr << "ERROR: --model is required unless --gate-only is set.\n";
         return false;
     }
     return true;
@@ -184,20 +192,25 @@ int main(int argc, char** argv) {
     // -----------------------------------------------------------
     // ASR engine
     // -----------------------------------------------------------
-    pipeline::AsrConfig asr_cfg;
-    asr_cfg.model_path = args.model_path;
-    asr_cfg.n_threads  = args.n_threads;
-    asr_cfg.language   = args.language;
-
-    pipeline::AsrEngine asr(asr_cfg);
-    if (!asr.ready()) {
-        std::cerr << "ERROR loading model: " << asr.load_error() << "\n";
-        return 1;
+    // ASR engine — only initialised when not in gate-only mode.
+    std::unique_ptr<pipeline::AsrEngine> asr_ptr;
+    if (!args.gate_only) {
+        pipeline::AsrConfig asr_cfg;
+        asr_cfg.model_path = args.model_path;
+        asr_cfg.n_threads  = args.n_threads;
+        asr_cfg.language   = args.language;
+        asr_ptr = std::make_unique<pipeline::AsrEngine>(asr_cfg);
+        if (!asr_ptr->ready()) {
+            std::cerr << "ERROR loading model: " << asr_ptr->load_error() << "\n";
+            return 1;
+        }
+        std::cerr << "[asr] backend_requested=" << (asr_ptr->gpu_requested() ? "cuda" : "cpu")
+                  << " backend_active=" << asr_ptr->backend_mode()
+                  << " cpu_fallback=" << (asr_ptr->used_cpu_fallback() ? "yes" : "no")
+                  << "\n";
+    } else {
+        std::cerr << "[asr] gate-only mode, model not loaded\n";
     }
-    std::cerr << "[asr] backend_requested=" << (asr.gpu_requested() ? "cuda" : "cpu")
-              << " backend_active=" << asr.backend_mode()
-              << " cpu_fallback=" << (asr.used_cpu_fallback() ? "yes" : "no")
-              << "\n";
 
     // -----------------------------------------------------------
     // Main loop: gate -> ASR -> log
@@ -232,16 +245,17 @@ int main(int argc, char** argv) {
             case pipeline::GateDecision::BORDERLINE: ++n_borderline; break;
         }
 
-        // ASR: run on PASS and BORDERLINE unless adaptive controller suppresses it
+        // ASR: run on PASS and BORDERLINE unless gate-only or adaptive suppresses it
         pipeline::AsrResult asr_result;
         const bool run_asr =
+            !args.gate_only &&
             (!args.gate_enabled ||
              gate.decision == pipeline::GateDecision::PASS ||
              gate.decision == pipeline::GateDecision::BORDERLINE) &&
             !adaptive.skip_asr(scene.label);
 
-        if (run_asr) {
-            asr_result = asr.transcribe(
+        if (run_asr && asr_ptr) {
+            asr_result = asr_ptr->transcribe(
                 chunk.samples.data(),
                 static_cast<int>(chunk.samples.size()));
             total_infer_ms += asr_result.inference_ms;
