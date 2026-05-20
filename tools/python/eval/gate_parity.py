@@ -3,7 +3,7 @@
 gate_parity.py
 Validate Python gate feature extraction against the C++ runtime.
 
-Runs the C++ binary in --gate-only mode (no ASR) on a small deterministic WAV
+Runs the C++ binary in --gate-only mode (no ASR) on a small deterministic audio
 subset, reads the per-chunk metrics from the JSON output, runs the Python gate
 logic (gate_eval.py) on the same files, then compares each metric with
 per-metric absolute tolerances.
@@ -45,7 +45,7 @@ import gate_eval  # noqa: E402
 
 DEFAULT_BINARY  = "runtime/cpp/build/audio_pipeline"
 DEFAULT_LABELS  = "data/labels/eval_subset.jsonl"
-N_PER_LABEL     = 3  # files per label
+N_PER_LABEL     = 5  # files per label across all 7 eval labels
 
 # Per-metric absolute tolerances.
 # These reflect systematic differences between float32 C++ and float64 Python.
@@ -83,7 +83,12 @@ FIELD_MAP = {
 
 
 def select_files(labels_path: str, n_per_label: int) -> List[Dict]:
-    """Select up to n_per_label WAV files per label (deterministic: first n sorted)."""
+    """Select up to n_per_label files per label, WAV and FLAC (deterministic: first n sorted).
+
+    FLAC files are included so that labels sourced from LibriSpeech (clean_speech)
+    are covered. FLAC files are converted to a temporary WAV before C++ validation;
+    Python evaluation runs on the original file.
+    """
     import json as _json
     labels: List[Dict] = []
     with open(labels_path) as fh:
@@ -94,7 +99,7 @@ def select_files(labels_path: str, n_per_label: int) -> List[Dict]:
 
     by_label: Dict[str, List[Dict]] = {}
     for entry in labels:
-        if not entry["path"].lower().endswith(".wav"):
+        if not entry["path"].lower().endswith((".wav", ".flac")):
             continue
         lbl = entry["label"]
         by_label.setdefault(lbl, []).append(entry)
@@ -156,10 +161,17 @@ def run_cpp_gate_only(
 
 
 def run_python_gate(wav_path: str, chunk_sec: float = 5.0) -> List[Dict]:
-    """Run Python gate on a WAV file. Returns list of chunk metric dicts."""
+    """Run Python gate on an audio file. Returns list of chunk metric dicts."""
     cfg = dict(gate_eval.DEFAULT_CONFIG)
     result = gate_eval.evaluate_file(wav_path, cfg, chunk_sec)
     return result.get("chunks", [])
+
+
+def _flac_to_wav(src: str, dst: str) -> None:
+    """Convert src (any soundfile-readable format) to a 16-bit PCM WAV at dst."""
+    import soundfile as sf
+    data, sr = sf.read(src, dtype="int16", always_2d=False)
+    sf.write(dst, data, sr, subtype="PCM_16")
 
 
 def compare_chunks(
@@ -215,8 +227,12 @@ def run_parity(
 ) -> Dict:
     """Run full parity check. Returns result dict."""
     files = select_files(labels_path, n_per_label)
-    print(f"Selected {len(files)} WAV files ({n_per_label} per label) for parity check.",
-          file=sys.stderr)
+    all_labels = sorted({e.get("label", "") for e in files})
+    print(
+        f"Selected {len(files)} audio files ({n_per_label}/label, "
+        f"{len(all_labels)} labels: {', '.join(all_labels)})",
+        file=sys.stderr,
+    )
 
     chunk_sec = chunk_ms / 1000.0
     total_chunks  = 0
@@ -232,10 +248,32 @@ def run_parity(
         name     = os.path.basename(wav_path)
         print(f"  {name:55s}", end="", file=sys.stderr, flush=True)
 
-        cpp_chunks = run_cpp_gate_only(binary, wav_path, chunk_ms)
+        # FLAC files cannot be read by the C++ binary (dr_wav is WAV-only).
+        # Convert to a temporary WAV; Python evaluation uses the original path.
+        tmp_wav: Optional[str] = None
+        if not wav_path.lower().endswith(".wav"):
+            tmp_wav = tempfile.mktemp(suffix=".wav")
+            try:
+                _flac_to_wav(wav_path, tmp_wav)
+            except Exception as exc:
+                print(f" [CONVERT FAILED: {exc}]", file=sys.stderr)
+                file_results.append({"path": wav_path, "label": entry.get("label", ""), "status": "cpp_failed"})
+                continue
+        cpp_input = tmp_wav if tmp_wav else wav_path
+
+        try:
+            cpp_chunks = run_cpp_gate_only(binary, cpp_input, chunk_ms)
+        finally:
+            if tmp_wav:
+                try:
+                    os.unlink(tmp_wav)
+                except OSError:
+                    pass
+        tmp_wav = None
+
         if cpp_chunks is None:
             print(" [C++ FAILED]", file=sys.stderr)
-            file_results.append({"path": wav_path, "status": "cpp_failed"})
+            file_results.append({"path": wav_path, "label": entry.get("label", ""), "status": "cpp_failed"})
             continue
 
         py_chunks = run_python_gate(wav_path, chunk_sec)
@@ -247,6 +285,7 @@ def run_parity(
             print(f" [CHUNK COUNT MISMATCH: cpp={n_cpp}, py={n_py}]", file=sys.stderr)
             file_results.append({
                 "path":   wav_path,
+                "label":  entry.get("label", ""),
                 "status": "chunk_count_mismatch",
                 "n_cpp":  n_cpp,
                 "n_py":   n_py,
@@ -284,6 +323,20 @@ def run_parity(
     # Overall pass/fail
     parity_ok = (total_mismatch == 0)
 
+    # Per-label coverage summary
+    labels_covered: Dict[str, Dict] = {}
+    for fr in file_results:
+        lbl = fr.get("label", "")
+        if lbl not in labels_covered:
+            labels_covered[lbl] = {"n_files": 0, "n_ok": 0, "n_mismatch": 0, "n_skip": 0}
+        labels_covered[lbl]["n_files"] += 1
+        if fr.get("status") == "ok":
+            labels_covered[lbl]["n_ok"] += 1
+        elif fr.get("status") in ("mismatch", "chunk_count_mismatch"):
+            labels_covered[lbl]["n_mismatch"] += 1
+        elif fr.get("status") == "cpp_failed":
+            labels_covered[lbl]["n_skip"] += 1
+
     return {
         "n_files":          len(files),
         "n_chunks":         total_chunks,
@@ -292,6 +345,7 @@ def run_parity(
         "parity_pass":      parity_ok,
         "worst_metric_err": worst,
         "tolerances":       TOLERANCES,
+        "labels_covered":   labels_covered,
         "files":            file_results,
     }
 
@@ -314,6 +368,36 @@ def print_report(r: Dict) -> None:
         tol = r["tolerances"].get(metric, "?")
         flag = "  " if worst <= float(tol) else "!!"
         print(f"  {flag} {metric:20s}  worst={worst:.6f}  tol={tol}")
+
+    lc = r.get("labels_covered", {})
+    if lc:
+        print()
+        print("Labels covered:")
+        all_expected = {
+            "clean_speech", "clipped_or_distorted", "low_utility",
+            "music", "speech_in_noise", "speech_in_reverb", "stationary_noise",
+        }
+        for lbl in sorted(all_expected):
+            v = lc.get(lbl)
+            if v is None:
+                print(f"  {lbl:35s}  MISSING (no files selected)")
+            else:
+                n_skip = v.get("n_skip", 0)
+                if v["n_mismatch"] > 0:
+                    status = "MISMATCH"
+                elif n_skip == v["n_files"]:
+                    status = "SKIPPED (all cpp_failed)"
+                elif n_skip > 0:
+                    status = f"PARTIAL ({n_skip} skipped)"
+                else:
+                    status = "PASS"
+                ok_pct = v["n_ok"] / max(v["n_files"] - n_skip, 1) if n_skip < v["n_files"] else 0.0
+                print(
+                    f"  {lbl:35s}  files={v['n_files']:2d}  "
+                    f"ok={v['n_ok']:2d}  skip={n_skip:2d}  mismatch={v['n_mismatch']:2d}  "
+                    f"{status}"
+                    + (f"  ({ok_pct:.0%})" if status not in ("SKIPPED (all cpp_failed)",) else "")
+                )
 
     mismatches = [
         f

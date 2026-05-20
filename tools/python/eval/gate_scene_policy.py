@@ -41,6 +41,7 @@ Usage:
 import argparse
 import datetime
 import json
+import math
 import os
 import sys
 from typing import Dict, List, Tuple
@@ -68,6 +69,24 @@ DEFAULT_SCENE_CONFIG: Dict = {
     "mixed_flatness_min":  0.40,
 }
 
+# High-confidence threshold for conservative music rejection.
+# Chunks classified as MUSIC only trigger a skip decision when the classifier
+# confidence exceeds this value, reducing false rejects on voiced speech that
+# borderline satisfies the MUSIC rule (low flatness + some low+high band energy).
+HIGH_CONF: float = 0.7
+
+# Stricter music detection — reduces clean speech mis-classified as MUSIC.
+# Raising music_band_low_min from 0.18 to 0.25 requires more bass energy
+# before firing the MUSIC rule. Male voices have band_low ~0.10-0.24;
+# bass guitar / bass drum typically exceeds 0.25.
+# Raising music_band_high_min from 0.08 to 0.12 similarly reduces
+# false positives from speech with prominent sibilant consonants.
+STRICT_MUSIC_CFG: Dict = {
+    **DEFAULT_SCENE_CONFIG,
+    "music_band_low_min":  0.25,
+    "music_band_high_min": 0.12,
+}
+
 # Scene label strings — must match scene_label_str() in scene.cpp
 SILENCE = "SILENCE"
 NOISE   = "NOISE"
@@ -77,20 +96,22 @@ MIXED   = "MIXED"
 UNKNOWN = "UNKNOWN"
 
 
-def classify_chunk(m: Dict, cfg: Dict) -> str:
-    """Rule-based scene classification on pre-computed chunk metrics.
+def soft_conf(val: float, threshold: float, spread: float, direction: int) -> float:
+    """Mirrors C++ soft_conf(). Returns smooth confidence in [0, 1].
 
-    Mirrors the decision priority in scene.cpp:
-      1. SILENCE — low RMS or low active frame fraction
-      2. NOISE   — high spectral flatness (broadband)
-      3. MUSIC   — tonal + low+high band energy spread
-      4. SPEECH  — mid-band dominant, centroid in voice range, low flatness
-      5. MIXED   — speech-like but elevated flatness (noisy speech)
-      6. UNKNOWN — features present but no pattern matches
+    direction=+1: higher value => more confident (e.g. flatness above noise thresh)
+    direction=-1: lower value  => more confident (e.g. rms below silence thresh)
+    """
+    raw = direction * (val - threshold) / max(spread, 1e-9)
+    return min(1.0, max(0.0, 0.5 + 0.5 * math.tanh(raw * 3.0)))
 
-    Audio concept: this runs on the same GateMetrics the C++ pipeline already
-    computes. No new feature extraction needed. The scene label is a post-gate
-    context annotation that can be used to override gate decisions.
+
+def classify_chunk_with_conf(m: Dict, cfg: Dict) -> Tuple[str, float]:
+    """Scene classification with confidence score. Returns (label, confidence).
+
+    Mirrors scene.cpp classify() including the confidence computation.
+    confidence is a heuristic score in [0, 1]: how strongly the features match
+    the winning rule. Used to implement conservative high-confidence-only skips.
     """
     rms      = m.get("rms", 0.0)
     active   = m.get("active_frac", 0.0)
@@ -102,38 +123,51 @@ def classify_chunk(m: Dict, cfg: Dict) -> str:
 
     # 1. SILENCE
     if rms < cfg["silence_rms_max"] or active < cfg["silence_active_max"]:
-        return SILENCE
+        conf = soft_conf(rms, cfg["silence_rms_max"], cfg["silence_rms_max"], -1)
+        return SILENCE, conf
 
-    # If spectral features were not computed (gate short-circuited before FFT),
-    # flatness and centroid will be 0. Label UNKNOWN to avoid misclassification.
+    # No spectral features computed (gate short-circuited before FFT).
     if flatness == 0.0 and centroid == 0.0 and band_mid == 0.0:
-        return UNKNOWN
+        return UNKNOWN, 0.0
 
-    # 2. NOISE — high spectral flatness
+    # 2. NOISE — spectrally flat
     if flatness >= cfg["noise_flatness_min"]:
-        return NOISE
+        conf = soft_conf(flatness, cfg["noise_flatness_min"],
+                         1.0 - cfg["noise_flatness_min"], +1)
+        return NOISE, conf
 
-    # 3. MUSIC — tonal but energy spread across low + high bands.
-    # This is the key music discriminator: music has both bass (band_low) and
-    # treble (band_high) energy, while clean speech concentrates in mid-band.
-    is_tonal       = flatness  < cfg["music_flatness_max"]
-    has_low_energy = band_low  >= cfg["music_band_low_min"]
-    has_high_energy= band_high >= cfg["music_band_high_min"]
+    # 3. MUSIC — tonal with energy in both low and high bands
+    is_tonal        = flatness  < cfg["music_flatness_max"]
+    has_low_energy  = band_low  >= cfg["music_band_low_min"]
+    has_high_energy = band_high >= cfg["music_band_high_min"]
     if is_tonal and has_low_energy and has_high_energy:
-        return MUSIC
+        s_tonal = soft_conf(flatness,  cfg["music_flatness_max"],  cfg["music_flatness_max"],  -1)
+        s_low   = soft_conf(band_low,  cfg["music_band_low_min"],  cfg["music_band_low_min"],  +1)
+        s_high  = soft_conf(band_high, cfg["music_band_high_min"], cfg["music_band_high_min"], +1)
+        conf = (s_tonal * s_low * s_high) ** (1.0 / 3.0)  # geometric mean, mirrors cbrt()
+        return MUSIC, conf
 
     # 4. SPEECH — centroid in voice range, mid-band dominant, low flatness
     centroid_ok = cfg["speech_centroid_min"] <= centroid <= cfg["speech_centroid_max"]
     mid_dom     = band_mid >= cfg["speech_band_mid_dom"]
     flat_ok     = flatness < cfg["mixed_flatness_min"]
     if centroid_ok and mid_dom and flat_ok:
-        return SPEECH
+        conf = soft_conf(band_mid, cfg["speech_band_mid_dom"],
+                         1.0 - cfg["speech_band_mid_dom"], +1)
+        return SPEECH, conf
 
-    # 5. MIXED — speech-like centroid + mid-band but elevated flatness
+    # 5. MIXED — speech-like but elevated flatness
     if centroid_ok and mid_dom:
-        return MIXED
+        conf = soft_conf(flatness, cfg["mixed_flatness_min"],
+                         cfg["noise_flatness_min"] - cfg["mixed_flatness_min"], +1)
+        return MIXED, conf
 
-    return UNKNOWN
+    return UNKNOWN, 0.0
+
+
+def classify_chunk(m: Dict, cfg: Dict) -> str:
+    """Backward-compatible wrapper — returns scene label only."""
+    return classify_chunk_with_conf(m, cfg)[0]
 
 
 def file_scene_label(chunk_labels: List[str]) -> str:
@@ -170,44 +204,63 @@ def _gate_accepts(file_decision: str) -> bool:
 POLICIES = {
     "A_gate_only": {
         "description": "Gate PASS/BORDERLINE (baseline, no scene)",
-        "accept_fn":   None,   # filled in evaluate_policies
     },
-    "B_scene_only": {
-        "description": "Any chunk scene in {SPEECH, MIXED, UNKNOWN} (no gate)",
-        "accept_fn":   None,
+    "B_gate_high_conf_music_skip": {
+        "description":
+            f"Gate PASS/BORDER AND NOT (scene=MUSIC with conf >= {HIGH_CONF})",
     },
-    "C_gate_and_scene_skip_music_silence": {
-        "description": "Gate PASS/BORDER AND file scene not in {MUSIC, SILENCE}",
-        "accept_fn":   None,
+    "C_gate_high_conf_music_silence_skip": {
+        "description":
+            f"Gate PASS/BORDER AND NOT (MUSIC conf>={HIGH_CONF} OR file_scene=SILENCE)",
     },
-    "D_gate_and_scene_skip_music_silence_noise": {
-        "description": "Gate PASS/BORDER AND file scene not in {MUSIC, SILENCE, NOISE}",
-        "accept_fn":   None,
+    "D_gate_strict_music_skip": {
+        "description":
+            "Gate PASS/BORDER AND NOT (MUSIC under strict thresholds: "
+            "band_low>=0.25, band_high>=0.12)",
     },
 }
 
 
-def _accept_A(file_gate: str, file_scene: str, _chunk_scenes: List[str]) -> bool:
-    return _gate_accepts(file_gate)
+# Accept functions take a pre-built entry dict with scene and confidence fields.
+def _accept_A(e: Dict) -> bool:
+    return _gate_accepts(e["file_gate"])
 
 
-def _accept_B(file_gate: str, file_scene: str, chunk_scenes: List[str]) -> bool:
-    return any(s in (SPEECH, MIXED, UNKNOWN) for s in chunk_scenes)
+def _accept_B(e: Dict) -> bool:
+    # Reject only when MUSIC confidence is high — avoids penalising speech that
+    # borderline triggers the MUSIC rule with low confidence.
+    if not _gate_accepts(e["file_gate"]):
+        return False
+    return e["max_music_conf"] < HIGH_CONF
 
 
-def _accept_C(file_gate: str, file_scene: str, _chunk_scenes: List[str]) -> bool:
-    return _gate_accepts(file_gate) and file_scene not in (MUSIC, SILENCE)
+def _accept_C(e: Dict) -> bool:
+    # Like B, but also rejects files that the classifier is certain are silent.
+    # SILENCE here means file_scene_label() returned SILENCE, i.e. every chunk
+    # was SILENCE — a truly quiet file. Silent files are safe to reject hard.
+    if not _gate_accepts(e["file_gate"]):
+        return False
+    if e["max_music_conf"] >= HIGH_CONF:
+        return False
+    if e["file_scene"] == SILENCE:
+        return False
+    return True
 
 
-def _accept_D(file_gate: str, file_scene: str, _chunk_scenes: List[str]) -> bool:
-    return _gate_accepts(file_gate) and file_scene not in (MUSIC, SILENCE, NOISE)
+def _accept_D(e: Dict) -> bool:
+    # Stricter music thresholds (band_low_min=0.25, band_high_min=0.12).
+    # Under these thresholds fewer speech files are mis-classified as MUSIC,
+    # so a hard reject on MUSIC at the file level becomes safer.
+    if not _gate_accepts(e["file_gate"]):
+        return False
+    return e["file_scene_strict"] != MUSIC
 
 
 ACCEPT_FNS = {
-    "A_gate_only":                           _accept_A,
-    "B_scene_only":                          _accept_B,
-    "C_gate_and_scene_skip_music_silence":   _accept_C,
-    "D_gate_and_scene_skip_music_silence_noise": _accept_D,
+    "A_gate_only":                         _accept_A,
+    "B_gate_high_conf_music_skip":         _accept_B,
+    "C_gate_high_conf_music_silence_skip": _accept_C,
+    "D_gate_strict_music_skip":            _accept_D,
 }
 
 
@@ -226,22 +279,43 @@ def evaluate_policies(
     n_should_yes = sum(1 for r in file_records if r.get("should_transcribe") == "yes")
     n_should_no  = sum(1 for r in file_records if r.get("should_transcribe") == "no")
 
-    # Per-file scene classification (one pass, reused across all policies)
+    # Per-file scene classification — one pass, results reused across all policies.
     file_entries: List[Dict] = []
     scene_dist: Dict[str, int] = {}
     for r in file_records:
         chunks = r.get("chunks", [])
-        chunk_scene_labels = [classify_chunk(c, scene_cfg) for c in chunks]
-        f_scene = file_scene_label(chunk_scene_labels)
+
+        # Default config — classify with confidence scores.
+        def_results        = [classify_chunk_with_conf(c, scene_cfg) for c in chunks]
+        chunk_scene_labels = [x[0] for x in def_results]
+        chunk_scene_confs  = [x[1] for x in def_results]
+        f_scene            = file_scene_label(chunk_scene_labels)
+        # Max confidence among MUSIC chunks (0 if no MUSIC chunks).
+        max_music_conf = max(
+            (conf for lbl, conf in zip(chunk_scene_labels, chunk_scene_confs)
+             if lbl == MUSIC),
+            default=0.0,
+        )
+
         for s in chunk_scene_labels:
             scene_dist[s] = scene_dist.get(s, 0) + 1
+
+        # Strict music config — for policy D.
+        str_results         = [classify_chunk_with_conf(c, STRICT_MUSIC_CFG) for c in chunks]
+        chunk_scenes_strict = [x[0] for x in str_results]
+        file_scene_strict   = file_scene_label(chunk_scenes_strict)
+
         file_entries.append({
-            "record":       r,
-            "chunk_scenes": chunk_scene_labels,
-            "file_scene":   f_scene,
-            "file_gate":    r.get("file_decision", "FAIL"),
-            "should_transcribe": r.get("should_transcribe", ""),
-            "label":        r.get("label", ""),
+            "record":             r,
+            "chunk_scenes":       chunk_scene_labels,
+            "chunk_confs":        chunk_scene_confs,
+            "file_scene":         f_scene,
+            "max_music_conf":     max_music_conf,
+            "chunk_scenes_strict": chunk_scenes_strict,
+            "file_scene_strict":  file_scene_strict,
+            "file_gate":          r.get("file_decision", "FAIL"),
+            "should_transcribe":  r.get("should_transcribe", ""),
+            "label":              r.get("label", ""),
         })
 
     # Evaluate each policy
@@ -257,9 +331,9 @@ def evaluate_policies(
         music_fa_count = 0
 
         for e in file_entries:
-            accepted = accept_fn(e["file_gate"], e["file_scene"], e["chunk_scenes"])
-            lbl = e["label"]
-            st  = e["should_transcribe"]
+            accepted = accept_fn(e)
+            lbl  = e["label"]
+            st   = e["should_transcribe"]
             path = e["record"].get("path", "")
 
             if accepted:
@@ -277,10 +351,11 @@ def evaluate_policies(
 
             if st == "no" and accepted:
                 fa_examples.append({
-                    "path":  os.path.basename(path),
-                    "label": lbl,
-                    "scene": e["file_scene"],
-                    "gate":  e["file_gate"],
+                    "path":       os.path.basename(path),
+                    "label":      lbl,
+                    "scene":      e["file_scene"],
+                    "gate":       e["file_gate"],
+                    "music_conf": round(e["max_music_conf"], 3),
                 })
                 if lbl == "music":
                     music_fa_count += 1
@@ -444,10 +519,12 @@ def main() -> None:
         json.dump(
             {
                 "meta": {
-                    "timestamp":     ts,
-                    "baseline_file": args.baseline,
-                    "n_files":       n_total,
-                    "scene_config":  scene_cfg,
+                    "timestamp":        ts,
+                    "baseline_file":    args.baseline,
+                    "n_files":          n_total,
+                    "high_conf_thresh": HIGH_CONF,
+                    "scene_config":     scene_cfg,
+                    "strict_music_cfg": dict(STRICT_MUSIC_CFG),
                 },
                 "scene_distribution": scene_dist,
                 "policies":           policy_results,
