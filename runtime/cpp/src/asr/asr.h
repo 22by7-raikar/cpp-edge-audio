@@ -37,6 +37,10 @@ public:
     // Returns true if the model loaded successfully.
     bool ready() const { return ctx_ != nullptr; }
     const std::string& load_error() const { return load_error_; }
+    bool gpu_requested() const { return gpu_requested_; }
+    bool gpu_enabled() const { return gpu_enabled_; }
+    bool used_cpu_fallback() const { return cpu_fallback_; }
+    const std::string& backend_mode() const { return backend_mode_; }
 
     // Run transcription on mono float32 PCM at 16kHz.
     // Whisper requires 16 kHz input; caller must ensure this or results are wrong.
@@ -46,6 +50,10 @@ private:
     whisper_context* ctx_       = nullptr;
     AsrConfig        cfg_;
     std::string      load_error_;
+    bool             gpu_requested_ = false;
+    bool             gpu_enabled_   = false;
+    bool             cpu_fallback_  = false;
+    std::string      backend_mode_  = "cpu";
 };
 
 }  // namespace pipeline

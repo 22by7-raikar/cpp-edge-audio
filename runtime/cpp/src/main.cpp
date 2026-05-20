@@ -194,6 +194,10 @@ int main(int argc, char** argv) {
         std::cerr << "ERROR loading model: " << asr.load_error() << "\n";
         return 1;
     }
+    std::cerr << "[asr] backend_requested=" << (asr.gpu_requested() ? "cuda" : "cpu")
+              << " backend_active=" << asr.backend_mode()
+              << " cpu_fallback=" << (asr.used_cpu_fallback() ? "yes" : "no")
+              << "\n";
 
     // -----------------------------------------------------------
     // Main loop: gate -> ASR -> log

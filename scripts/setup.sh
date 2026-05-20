@@ -45,7 +45,8 @@ fi
 
 echo ""
 echo "Setup complete. Next steps:"
-echo "  1. bash scripts/build.sh                  # build the pipeline"
-echo "  2. bash scripts/run_tests.sh               # run unit tests (needs -DBUILD_TESTS=ON)"
-echo "  3. bash scripts/datasets/download_stage1.sh --lite   # download eval datasets"
+echo "  1. bash scripts/build.sh Release cpu      # build CPU pipeline"
+echo "  2. bash scripts/build.sh Release cuda     # build CUDA pipeline (if nvcc available)"
+echo "  3. bash scripts/run_tests.sh               # run unit tests (needs -DBUILD_TESTS=ON)"
+echo "  4. bash scripts/datasets/download_stage1.sh --lite   # download eval datasets"
 

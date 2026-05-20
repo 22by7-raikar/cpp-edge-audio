@@ -13,13 +13,34 @@
 namespace pipeline {
 
 AsrEngine::AsrEngine(const AsrConfig& cfg) : cfg_(cfg) {
-    // whisper_init_from_file is available across all whisper.cpp versions.
-    // TODO(M3): switch to whisper_init_from_file_with_params when
-    //           GPU/CUDA/CoreML context params are needed.
-    ctx_ = whisper_init_from_file(cfg.model_path.c_str());
-    if (!ctx_) {
-        load_error_ = "whisper_init_from_file failed: " + cfg.model_path;
+    whisper_context_params cparams = whisper_context_default_params();
+#ifdef GGML_CUDA
+    gpu_requested_ = true;
+    cparams.use_gpu = true;
+    cparams.gpu_device = 0;
+#else
+    gpu_requested_ = false;
+    cparams.use_gpu = false;
+#endif
+
+    ctx_ = whisper_init_from_file_with_params(cfg.model_path.c_str(), cparams);
+    if (!ctx_ && gpu_requested_) {
+        // CUDA requested but unavailable at runtime/device selection failed.
+        cpu_fallback_ = true;
+        cparams.use_gpu = false;
+        cparams.gpu_device = 0;
+        ctx_ = whisper_init_from_file_with_params(cfg.model_path.c_str(), cparams);
     }
+
+    if (!ctx_) {
+        load_error_ = "whisper_init_from_file_with_params failed: " + cfg.model_path;
+        backend_mode_ = "unavailable";
+        gpu_enabled_ = false;
+        return;
+    }
+
+    gpu_enabled_ = gpu_requested_ && !cpu_fallback_;
+    backend_mode_ = gpu_enabled_ ? "cuda" : "cpu";
 }
 
 AsrEngine::~AsrEngine() {

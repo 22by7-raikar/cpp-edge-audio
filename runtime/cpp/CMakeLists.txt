@@ -13,6 +13,9 @@ endif()
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 set(CMAKE_CXX_FLAGS_Debug "-O0 -g")
 
+# whisper.cpp backend toggle
+option(GGML_CUDA "Enable CUDA backend in whisper.cpp" OFF)
+
 # -------------------------------------------------------------------
 # M6 Optimization options  (all OFF by default; enabled via -D flags
 # or scripts/build_optimized.sh)
@@ -76,6 +79,9 @@ if(NOT EXISTS "${WHISPER_ROOT}/CMakeLists.txt")
         "Run: git submodule update --init from repo root, or set -DWHISPER_ROOT=<path>.")
 endif()
 
+# Ensure the subproject sees this cache variable.
+set(GGML_CUDA ${GGML_CUDA} CACHE BOOL "Enable CUDA backend in whisper.cpp" FORCE)
+
 add_subdirectory(${WHISPER_ROOT} ${CMAKE_CURRENT_BINARY_DIR}/whisper_build)
 
 # -------------------------------------------------------------------
@@ -101,6 +107,13 @@ target_include_directories(audio_pipeline PRIVATE
 )
 
 target_link_libraries(audio_pipeline PRIVATE whisper)
+
+if(GGML_CUDA)
+    target_compile_definitions(audio_pipeline PRIVATE GGML_CUDA=1)
+    message(STATUS "Backend      : CUDA requested (GGML_CUDA=ON)")
+else()
+    message(STATUS "Backend      : CPU only (GGML_CUDA=OFF)")
+endif()
 
 # math library (needed on some Linux configurations)
 find_library(MATH_LIB m)
