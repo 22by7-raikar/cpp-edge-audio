@@ -8,11 +8,23 @@ Models    : LogisticRegression, RandomForestClassifier, GradientBoostingClassifi
 Split     : grouped by base_utterance_id to prevent utterance leakage across split.
 Baseline  : rule gate (PASS/BORDERLINE -> accept, FAIL -> reject).
 
+Analyses:
+    threshold_sweep   FAR/FRR/F1 at thresholds 0.1..0.9 (prob models only).
+    ablation          DSP-only (24 features) vs all (27 features).
+    operating_points  balanced (max F1) and conservative
+                      (max F1 s.t. FRR <= rule_gate_FRR + 0.02).
+
+Outputs written to --out:
+    model_comparison_<ts>.json
+    feature_importance_<ts>.json
+    threshold_sweep_<ts>.tsv
+    recommended_operating_points_<ts>.json
+
 Usage:
-    python tools/python/training/train_quality_model.py
     python tools/python/training/train_quality_model.py \\
-        --labels data/labels/eval_subset.jsonl \\
-        --out    benchmarks/results/quality_model/
+        --train-labels data/labels/quality_train.jsonl \\
+        --labels       data/labels/eval_subset.jsonl \\
+        --out          benchmarks/results/quality_model/
 """
 
 import argparse
@@ -59,6 +71,12 @@ FEATURE_NAMES: List[str] = (
     [f"{k}_max"  for k in METRIC_KEYS] +
     ["gate_pass_frac", "gate_borderline_frac", "gate_fail_frac"]
 )
+
+# First 24 features are DSP-only (no gate-decision fractions).
+N_DSP_FEATURES = 24
+
+# Probability thresholds to sweep.
+THRESHOLD_STEPS: List[float] = [round(t * 0.1, 1) for t in range(1, 10)]
 
 
 def _extract_features(path: str, cfg: Dict) -> Optional[Tuple[np.ndarray, str]]:
@@ -193,6 +211,49 @@ def _eval_metrics(
     }
 
 
+def _sweep_thresholds(
+    model_name: str,
+    y_true: np.ndarray,
+    y_proba: np.ndarray,
+    entries: List[Dict],
+    steps: List[float] = THRESHOLD_STEPS,
+) -> List[Dict]:
+    """Evaluate decision thresholds. y_proba is P(class=1)."""
+    rows = []
+    for t in steps:
+        y_pred = (y_proba >= t).astype(int)
+        m = _eval_metrics(y_true, y_pred, entries)
+        rows.append({
+            "model":           model_name,
+            "threshold":       t,
+            "far":             m["far"],
+            "frr":             m["frr"],
+            "precision":       m["precision"],
+            "recall":          m["recall"],
+            "f1":              m["f1"],
+            "music_fa":        m["music_fa"],
+            "clean_speech_fr": m["clean_speech_fr"],
+        })
+    return rows
+
+
+def _recommend_operating_points(
+    sweep_rows: List[Dict],
+    rule_frr: float,
+) -> Dict:
+    """Return two operating points from a threshold sweep.
+
+    balanced     : threshold maximising F1.
+    conservative : threshold maximising F1 subject to FRR <= rule_frr + 0.02.
+                   Falls back to minimum-FRR row when no row meets the constraint.
+    """
+    balanced = max(sweep_rows, key=lambda r: r["f1"])
+    frr_limit = round(rule_frr + 0.02, 4)
+    cands = [r for r in sweep_rows if r["frr"] <= frr_limit]
+    conservative = max(cands, key=lambda r: r["f1"]) if cands else min(sweep_rows, key=lambda r: r["frr"])
+    return {"balanced": balanced, "conservative": conservative}
+
+
 def _print_report(results: List[Dict], n_tr: int, n_te: int, mode: str = "") -> None:
     sep = "=" * 72
     print(f"\n{sep}")
@@ -240,6 +301,33 @@ def _print_report(results: List[Dict], n_tr: int, n_te: int, mode: str = "") -> 
                 print(f"    {fname:25s}  {imp:.4f}")
             break
 
+    print()
+
+
+def _print_ops_summary(ops_by_model: Dict[str, Dict], rule_metrics: Dict) -> None:
+    """Print threshold-sweep operating point recommendations."""
+    sep = "=" * 72
+    print(f"\n{sep}")
+    print("THRESHOLD SWEEP  -  RECOMMENDED OPERATING POINTS")
+    print(sep)
+    print(
+        f"  Rule gate baseline:  FAR={rule_metrics['far']:.4f}  "
+        f"FRR={rule_metrics['frr']:.4f}  F1={rule_metrics['f1']:.4f}"
+    )
+    print()
+    hdr = (
+        f"  {'Model':20s}  {'Point':13s}  {'Thresh':>6}  {'FAR':>6}  "
+        f"{'FRR':>6}  {'F1':>6}  {'MusicFA':>8}  {'CleanFR':>8}"
+    )
+    print(hdr)
+    print("  " + "-" * (len(hdr) - 2))
+    for model_name, ops in ops_by_model.items():
+        for point_name, row in ops.items():
+            print(
+                f"  {model_name:20s}  {point_name:13s}  {row['threshold']:>6.1f}  "
+                f"{row['far']:>6.4f}  {row['frr']:>6.4f}  {row['f1']:>6.4f}  "
+                f"{row['music_fa']:>8d}  {row['clean_speech_fr']:>8d}"
+            )
     print()
 
 
@@ -316,7 +404,7 @@ def main() -> None:
     X_te_s  = scaler.transform(X_te)
 
     # -----------------------------------------------------------------------
-    # Train and evaluate
+    # Train and evaluate (all 27 features)
     # -----------------------------------------------------------------------
     all_results = [
         {"name": "rule_gate", "metrics": _eval_metrics(y_te, gate_te, te_ents)},
@@ -347,7 +435,7 @@ def main() -> None:
     ]
 
     for name, clf, use_scaled in model_specs:
-        print(f"Training {name}...", file=sys.stderr)
+        print(f"Training {name} (all features)...", file=sys.stderr)
         Xtr = X_tr_s if use_scaled else X_tr
         Xte = X_te_s if use_scaled else X_te
         clf.fit(Xtr, y_tr)
@@ -363,32 +451,144 @@ def main() -> None:
     _print_report(all_results, n_tr, n_te, mode)
 
     # -----------------------------------------------------------------------
+    # Ablation: DSP-only (24 features) vs all (27 features)
+    # -----------------------------------------------------------------------
+    print("Running ablation (DSP-only vs all features)...", file=sys.stderr)
+    ablation_dsp: List[Dict] = []
+    # Fresh instances — the model_specs clfs are already fitted on all features.
+    dsp_specs = [
+        ("logreg", LogisticRegression(C=1.0, solver="liblinear", max_iter=500, random_state=SEED), True),
+        ("rf",     RandomForestClassifier(n_estimators=100, max_depth=6, min_samples_leaf=3, n_jobs=-1, random_state=SEED), False),
+        ("gbt",    GradientBoostingClassifier(n_estimators=100, max_depth=3, learning_rate=0.1, random_state=SEED), False),
+    ]
+    for dsp_name, clf_dsp, use_scaled in dsp_specs:
+        print(f"  {dsp_name} dsp...", file=sys.stderr)
+        Xtr_d = (X_tr_s if use_scaled else X_tr)[:, :N_DSP_FEATURES]
+        Xte_d = (X_te_s if use_scaled else X_te)[:, :N_DSP_FEATURES]
+        clf_dsp.fit(Xtr_d, y_tr)
+        yp_d  = clf_dsp.predict(Xte_d)
+        ablation_dsp.append({
+            "name":        f"{dsp_name}_dsp",
+            "feature_set": "dsp_only",
+            "metrics":     _eval_metrics(y_te, yp_d, te_ents),
+        })
+
+    # Print ablation comparison.
+    abl_all = {r["name"]: r["metrics"] for r in all_results if r["name"] != "rule_gate"}
+    abl_dsp = {r["name"].replace("_dsp", ""): r["metrics"] for r in ablation_dsp}
+    print("\n--- Ablation: gate-decision fractions vs DSP-only ---")
+    abl_hdr = (
+        f"  {'Model':12s}  {'Features':9s}  {'FAR':>6}  {'FRR':>6}  "
+        f"{'F1':>6}  {'MusicFA':>8}  {'CleanFR':>8}"
+    )
+    print(abl_hdr)
+    print("  " + "-" * (len(abl_hdr) - 2))
+    for mname in ("logreg", "rf", "gbt"):
+        for feat_label, mdict in (("all (27)", abl_all), ("dsp (24)", abl_dsp)):
+            m = mdict.get(mname)
+            if m:
+                print(
+                    f"  {mname:12s}  {feat_label:9s}  {m['far']:>6.4f}  "
+                    f"{m['frr']:>6.4f}  {m['f1']:>6.4f}  "
+                    f"{m['music_fa']:>8d}  {m['clean_speech_fr']:>8d}"
+                )
+    print()
+
+    # -----------------------------------------------------------------------
+    # Threshold sweep (models with predict_proba)
+    # -----------------------------------------------------------------------
+    rule_metrics  = all_results[0]["metrics"]
+    sweep_all:    List[Dict] = []
+    ops_by_model: Dict[str, Dict] = {}
+    for name, clf, use_scaled in model_specs:
+        if not hasattr(clf, "predict_proba"):
+            continue
+        Xte   = X_te_s if use_scaled else X_te
+        proba = clf.predict_proba(Xte)[:, 1]
+        rows  = _sweep_thresholds(name, y_te, proba, te_ents)
+        sweep_all.extend(rows)
+        ops_by_model[name] = _recommend_operating_points(rows, rule_metrics["frr"])
+
+    if ops_by_model:
+        _print_ops_summary(ops_by_model, rule_metrics)
+
+    # -----------------------------------------------------------------------
     # Save
     # -----------------------------------------------------------------------
     if args.out:
         out_dir = args.out if os.path.isabs(args.out) else os.path.join(_repo, args.out)
         os.makedirs(out_dir, exist_ok=True)
-        ts       = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_path = os.path.join(out_dir, f"quality_model_{ts}.json")
-        with open(out_path, "w") as fh:
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # model_comparison.json
+        mc_path = os.path.join(out_dir, f"model_comparison_{ts}.json")
+        with open(mc_path, "w") as fh:
             json.dump(
                 {
-                    "ts":           ts,
-                    "n_records":    len(records),
-                    "train_labels": args.train_labels,
-                    "train_n":      n_tr,
-                    "test_n":       n_te,
-                    "mode":         mode,
-                    "train_frac":   args.train_frac,
-                    "seed":         args.seed,
-                    "chunk_sec":    CHUNK_SEC,
+                    "ts":            ts,
+                    "n_records":     len(records),
+                    "train_labels":  args.train_labels,
+                    "train_n":       n_tr,
+                    "test_n":        n_te,
+                    "mode":          mode,
+                    "train_frac":    args.train_frac,
+                    "seed":          args.seed,
+                    "chunk_sec":     CHUNK_SEC,
                     "feature_names": FEATURE_NAMES,
-                    "models":       all_results,
+                    "models":        all_results,
+                    "ablation":      ablation_dsp,
                 },
                 fh,
                 indent=2,
             )
-        print(f"Results saved: {out_path}", file=sys.stderr)
+        print(f"Saved: {mc_path}", file=sys.stderr)
+
+        # feature_importance.json
+        fi_rows = [
+            {"model": r["name"], "importances": r["feature_importances"]}
+            for r in all_results if "feature_importances" in r
+        ]
+        if fi_rows:
+            fi_path = os.path.join(out_dir, f"feature_importance_{ts}.json")
+            with open(fi_path, "w") as fh:
+                json.dump(fi_rows, fh, indent=2)
+            print(f"Saved: {fi_path}", file=sys.stderr)
+
+        # threshold_sweep.tsv
+        if sweep_all:
+            tsv_path = os.path.join(out_dir, f"threshold_sweep_{ts}.tsv")
+            with open(tsv_path, "w") as fh:
+                fh.write("model\tthreshold\tfar\tfrr\tprecision\trecall\tf1\tmusic_fa\tclean_speech_fr\n")
+                for row in sweep_all:
+                    fh.write(
+                        f"{row['model']}\t{row['threshold']}\t"
+                        f"{row['far']}\t{row['frr']}\t"
+                        f"{row['precision']}\t{row['recall']}\t{row['f1']}\t"
+                        f"{row['music_fa']}\t{row['clean_speech_fr']}\n"
+                    )
+            print(f"Saved: {tsv_path}", file=sys.stderr)
+
+        # recommended_operating_points.json
+        if ops_by_model:
+            ops_path = os.path.join(out_dir, f"recommended_operating_points_{ts}.json")
+            with open(ops_path, "w") as fh:
+                json.dump(
+                    {
+                        "ts":        ts,
+                        "mode":      mode,
+                        "rule_gate": rule_metrics,
+                        "models": {
+                            n: {
+                                "balanced":     ops["balanced"],
+                                "conservative": ops["conservative"],
+                            }
+                            for n, ops in ops_by_model.items()
+                        },
+                    },
+                    fh,
+                    indent=2,
+                )
+            print(f"Saved: {ops_path}", file=sys.stderr)
 
 
 if __name__ == "__main__":
