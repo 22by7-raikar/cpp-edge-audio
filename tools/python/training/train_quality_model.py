@@ -537,6 +537,10 @@ def main() -> None:
                     help=f"RNG seed (default: {SEED})")
     ap.add_argument("--train-labels", default=None,
                     help="Separate training JSONL; if set, --labels is eval-only")
+    ap.add_argument("--val-labels", default=None,
+                    help="Validation JSONL for threshold tuning (if absent, --labels is used)")
+    ap.add_argument("--test-labels", default=None,
+                    help="Held-out test JSONL for final metrics (applied at val-tuned threshold)")
     ap.add_argument("--save-artifact", default=None, metavar="DIR",
                     help="Save best GBT artifact to DIR (joblib + schema + operating point + metrics)")
     ap.add_argument("--eval-artifact", default=None, metavar="DIR",
@@ -604,6 +608,32 @@ def main() -> None:
     scaler  = StandardScaler().fit(X_tr)
     X_tr_s  = scaler.transform(X_tr)
     X_te_s  = scaler.transform(X_te)
+
+    # Optional validation set for threshold tuning.
+    if args.val_labels:
+        val_path = args.val_labels if os.path.isabs(args.val_labels) \
+            else os.path.join(_repo, args.val_labels)
+        print(f"Loading val labels: {val_path}", file=sys.stderr)
+        val_recs = [json.loads(l) for l in open(val_path) if l.strip()]
+        print(f"Extracting val features ({len(val_recs)} files)...", file=sys.stderr)
+        X_val, y_val, gate_val, val_ents = _extract_all(val_recs, cfg)
+        print(f"  {len(X_val)}/{len(val_recs)} extracted.", file=sys.stderr)
+        X_val_s = scaler.transform(X_val) if len(X_val) else X_val
+    else:
+        X_val, y_val, gate_val, val_ents, X_val_s = None, None, None, None, None
+
+    # Optional held-out test set for final evaluation.
+    if args.test_labels:
+        test_path = args.test_labels if os.path.isabs(args.test_labels) \
+            else os.path.join(_repo, args.test_labels)
+        print(f"Loading test labels: {test_path}", file=sys.stderr)
+        test_recs = [json.loads(l) for l in open(test_path) if l.strip()]
+        print(f"Extracting test features ({len(test_recs)} files)...", file=sys.stderr)
+        X_test, y_test, gate_test, test_ents = _extract_all(test_recs, cfg)
+        print(f"  {len(X_test)}/{len(test_recs)} extracted.", file=sys.stderr)
+        X_test_s = scaler.transform(X_test) if len(X_test) else X_test
+    else:
+        X_test, y_test, gate_test, test_ents, X_test_s = None, None, None, None, None
 
     # -----------------------------------------------------------------------
     # Train and evaluate (all 27 features)
@@ -702,17 +732,55 @@ def main() -> None:
     rule_metrics  = all_results[0]["metrics"]
     sweep_all:    List[Dict] = []
     ops_by_model: Dict[str, Dict] = {}
+    # Use validation set for threshold tuning when available; else fall back
+    # to the eval set so old single-dataset mode is fully preserved.
+    tune_y    = y_val   if X_val is not None else y_te
+    tune_ents = val_ents if X_val is not None else te_ents
     for name, clf, use_scaled in model_specs:
         if not hasattr(clf, "predict_proba"):
             continue
-        Xte   = X_te_s if use_scaled else X_te
-        proba = clf.predict_proba(Xte)[:, 1]
-        rows  = _sweep_thresholds(name, y_te, proba, te_ents)
+        if X_val is not None:
+            Xtune = X_val_s if use_scaled else X_val
+        else:
+            Xtune = X_te_s  if use_scaled else X_te
+        proba = clf.predict_proba(Xtune)[:, 1]
+        rows  = _sweep_thresholds(name, tune_y, proba, tune_ents)
         sweep_all.extend(rows)
         ops_by_model[name] = _recommend_operating_points(rows, rule_metrics["frr"])
 
     if ops_by_model:
         _print_ops_summary(ops_by_model, rule_metrics)
+
+    # Optional: final held-out test evaluation (GBT at val-tuned threshold).
+    if X_test is not None and ops_by_model:
+        gbt_threshold = ops_by_model.get("gbt", {}).get("balanced", {}).get("threshold")
+        if gbt_threshold is not None:
+            gbt_clf  = next(clf for (nm, clf, _) in model_specs if nm == "gbt")
+            p_test   = gbt_clf.predict_proba(X_test)[:, 1]
+            yp_test  = (p_test >= gbt_threshold).astype(int)
+            m_test   = _eval_metrics(y_test, yp_test, test_ents)
+            m_rule_t = _eval_metrics(y_test, gate_test, test_ents)
+            sep = "=" * 72
+            print(f"\n{sep}")
+            print("FINAL HELD-OUT TEST METRICS")
+            print(sep)
+            print(f"  GBT threshold (from val/eval sweep): {gbt_threshold}")
+            print()
+            thdr = (
+                f"  {'Model':20s}  {'FAR':>6}  {'FRR':>6}  "
+                f"{'F1':>6}  {'MusicFA':>8}  {'CleanFR':>8}"
+            )
+            print(thdr)
+            print("  " + "-" * (len(thdr) - 2))
+            print(
+                f"  {'rule_gate':20s}  {m_rule_t['far']:>6.4f}  {m_rule_t['frr']:>6.4f}  "
+                f"{m_rule_t['f1']:>6.4f}  {m_rule_t['music_fa']:>8d}  {m_rule_t['clean_speech_fr']:>8d}"
+            )
+            print(
+                f"  {'gbt':20s}  {m_test['far']:>6.4f}  {m_test['frr']:>6.4f}  "
+                f"{m_test['f1']:>6.4f}  {m_test['music_fa']:>8d}  {m_test['clean_speech_fr']:>8d}"
+            )
+            print()
 
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 

@@ -55,9 +55,26 @@ from build_eval_subset import (    # noqa: E402
 
 REPO_ROOT  = Path(__file__).resolve().parents[2]
 MAN_DIR    = REPO_ROOT / "data" / "manifests"
-OUT_DIR    = REPO_ROOT / "data" / "processed" / "quality_train"
-LABEL_PATH = REPO_ROOT / "data" / "labels"   / "quality_train.jsonl"
-EVAL_LABEL = REPO_ROOT / "data" / "labels"   / "eval_subset.jsonl"
+LABEL_DIR  = REPO_ROOT / "data" / "labels"
+PROC_DIR   = REPO_ROOT / "data" / "processed"
+EVAL_LABEL = REPO_ROOT / "data" / "labels" / "eval_subset.jsonl"
+
+# Defaults preserved for backward compatibility; main() reassigns these via
+# the global statement so that builder functions see the correct output dir.
+OUT_DIR    = PROC_DIR  / "quality_train"
+LABEL_PATH = LABEL_DIR / "quality_train.jsonl"
+
+# Maps --speech-split to manifest filename and derived output stem.
+SPLIT_TO_MANIFEST: dict[str, str] = {
+    "train-clean-100": "librispeech_train_clean_100.jsonl",
+    "dev-clean":       "librispeech_dev_clean.jsonl",
+    "test-clean":      "librispeech_test_clean.jsonl",
+}
+SPLIT_TO_OUTPUT: dict[str, str] = {
+    "train-clean-100": "quality_train",
+    "dev-clean":       "quality_val",
+    "test-clean":      "quality_test",
+}
 
 DEFAULT_COUNTS: dict[str, int] = {
     "clean_speech":         400,
@@ -70,19 +87,27 @@ DEFAULT_COUNTS: dict[str, int] = {
 }
 
 
-def load_excluded_sources(path: Path) -> set:
-    """Source paths already used in eval_subset — exclude from training pools."""
-    if not path.exists():
-        return set()
+def load_excluded_sources(paths) -> set:
+    """Source paths in any of the given label files — exclude from pools.
+
+    Accepts a single Path/str or a list of paths.  Non-existent paths are
+    silently skipped.
+    """
+    if isinstance(paths, (str, Path)):
+        paths = [paths]
     excluded = set()
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                rec = json.loads(line)
-                src = rec.get("source", "")
-                if src:
-                    excluded.add(src)
+    for path in paths:
+        path = Path(path)
+        if not path.exists():
+            continue
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    rec = json.loads(line)
+                    src = rec.get("source", "")
+                    if src:
+                        excluded.add(src)
     return excluded
 
 
@@ -290,6 +315,15 @@ def main() -> None:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    ap.add_argument(
+        "--speech-split", default="test-clean",
+        choices=list(SPLIT_TO_MANIFEST),
+        help="LibriSpeech split for speech-derived labels (default: test-clean)",
+    )
+    ap.add_argument("--output-labels", default=None, metavar="PATH",
+                    help="Override label output path (default: derived from --speech-split)")
+    ap.add_argument("--output-dir",    default=None, metavar="DIR",
+                    help="Override processed-audio output dir (default: derived from --speech-split)")
     ap.add_argument("--seed",      type=int,  default=123,
                     help="RNG seed (default: 123; eval_subset uses 42)")
     ap.add_argument("--counts",    nargs="+", default=[], metavar="CLASS=N",
@@ -300,6 +334,17 @@ def main() -> None:
                     help="Plan only; no writes")
     args = ap.parse_args()
 
+    # Resolve output paths from split name unless explicitly overridden.
+    split_key  = SPLIT_TO_OUTPUT[args.speech_split]
+    out_dir    = Path(args.output_dir)    if args.output_dir    else PROC_DIR  / split_key
+    label_path = Path(args.output_labels) if args.output_labels else LABEL_DIR / f"{split_key}.jsonl"
+
+    # Update module-level OUT_DIR / LABEL_PATH so builder functions (which
+    # reference these names at call time) see the correct output directory.
+    global OUT_DIR, LABEL_PATH
+    OUT_DIR    = out_dir
+    LABEL_PATH = label_path
+
     counts: dict[str, int] = dict(DEFAULT_COUNTS)
     for item in args.counts:
         k, _, v = item.partition("=")
@@ -308,39 +353,68 @@ def main() -> None:
         else:
             print(f"  WARN: unknown or invalid --counts token '{item}'", file=sys.stderr)
 
-    print(f"Seed:      {args.seed}")
-    print(f"Dry run:   {args.dry_run}")
-    print(f"Overwrite: {args.overwrite}")
-    print(f"Counts:    {counts}")
-    print(f"Total target: {sum(counts.values())}")
+    print(f"Speech split:  {args.speech_split}")
+    print(f"Output labels: {label_path}")
+    print(f"Output dir:    {out_dir}")
+    print(f"Seed:          {args.seed}")
+    print(f"Dry run:       {args.dry_run}")
+    print(f"Overwrite:     {args.overwrite}")
+    print(f"Counts:        {counts}")
+    print(f"Total target:  {sum(counts.values())}")
     print()
 
     if not args.dry_run:
-        if OUT_DIR.exists() and any(OUT_DIR.rglob("*")):
+        if out_dir.exists() and any(out_dir.rglob("*")):
             if not args.overwrite:
                 print(
-                    f"ERROR: {OUT_DIR} already has data. Use --overwrite.",
+                    f"ERROR: {out_dir} already has data. Use --overwrite.",
                     file=sys.stderr,
                 )
                 sys.exit(1)
-            shutil.rmtree(OUT_DIR)
-        if LABEL_PATH.exists() and args.overwrite:
-            LABEL_PATH.unlink()
+            shutil.rmtree(out_dir)
+        if label_path.exists() and args.overwrite:
+            label_path.unlink()
 
-    excluded = load_excluded_sources(EVAL_LABEL)
-    print(f"Excluded sources from eval_subset: {len(excluded)}")
+    # Build exclusion set: always include eval_subset; also include any other
+    # quality split label files already on disk to prevent cross-split
+    # music / noise source leakage.
+    all_quality_keys = list(SPLIT_TO_OUTPUT.values())
+    exclude_paths = [EVAL_LABEL] + [
+        LABEL_DIR / f"{k}.jsonl"
+        for k in all_quality_keys
+        if k != split_key
+    ]
+    excluded = load_excluded_sources(exclude_paths)
+    n_excl_files = sum(1 for p in exclude_paths if Path(p).exists())
+    print(f"Excluded sources ({n_excl_files} label files checked): {len(excluded)} paths")
     print()
 
     rng = random.Random(args.seed)
 
-    test_clean  = load_manifest(MAN_DIR / "librispeech_test_clean.jsonl")
+    # Load speech manifest for the requested split.  Fail with a helpful
+    # message when train-clean-100 is not yet downloaded.
+    manifest_name = SPLIT_TO_MANIFEST[args.speech_split]
+    manifest_path = MAN_DIR / manifest_name
+    if not manifest_path.exists():
+        print(f"ERROR: manifest not found: {manifest_path}", file=sys.stderr)
+        if args.speech_split == "train-clean-100":
+            data_path = REPO_ROOT / "data" / "raw" / "librispeech" / "train-clean-100"
+            print(f"       Expected data at:  {data_path}", file=sys.stderr)
+            print(f"       Download from:     https://www.openslr.org/12/", file=sys.stderr)
+            print(f"       Then rebuild manifests and re-run this script.", file=sys.stderr)
+            print(f"       Fallback options:", file=sys.stderr)
+            print(f"         --speech-split dev-clean   (val set, present)", file=sys.stderr)
+            print(f"         --speech-split test-clean  (test set fallback, present)", file=sys.stderr)
+        sys.exit(1)
+
+    speech_pool = load_manifest(manifest_path)
     musan_noise = load_manifest(MAN_DIR / "musan_noise.jsonl")
     musan_music = load_manifest(MAN_DIR / "musan_music.jsonl")
     rirs        = load_manifest(MAN_DIR / "rirs.jsonl")
     demand      = load_manifest(MAN_DIR / "demand_16k.jsonl")
 
     missing = []
-    if not test_clean:  missing.append("librispeech_test_clean.jsonl")
+    if not speech_pool: missing.append(manifest_name)
     if not musan_noise: missing.append("musan_noise.jsonl")
     if not musan_music: missing.append("musan_music.jsonl")
     if not rirs:        missing.append("rirs.jsonl")
@@ -351,26 +425,26 @@ def main() -> None:
 
     sim_rirs = [r for r in rirs if r.get("rir_type") == "simulated"]
 
-    print(f"test-clean:      {len(test_clean):5d} records")
-    print(f"musan/noise:     {len(musan_noise):5d} records")
-    print(f"musan/music:     {len(musan_music):5d} records")
-    print(f"simulated RIRs:  {len(sim_rirs):5d} records")
-    print(f"demand_16k:      {len(demand):5d} records")
+    print(f"{args.speech_split}:   {len(speech_pool):5d} records")
+    print(f"musan/noise:      {len(musan_noise):5d} records")
+    print(f"musan/music:      {len(musan_music):5d} records")
+    print(f"simulated RIRs:   {len(sim_rirs):5d} records")
+    print(f"demand_16k:       {len(demand):5d} records")
     print()
 
     seed = args.seed
     all_labels: list = []
 
     print("Building clean_speech ...")
-    all_labels += build_clean_speech(test_clean, rng, counts["clean_speech"], seed, args.dry_run)
+    all_labels += build_clean_speech(speech_pool, rng, counts["clean_speech"], seed, args.dry_run)
 
     print("Building speech_in_noise ...")
     all_labels += build_speech_in_noise(
-        test_clean, musan_noise + demand, rng, counts["speech_in_noise"], seed, args.dry_run)
+        speech_pool, musan_noise + demand, rng, counts["speech_in_noise"], seed, args.dry_run)
 
     print("Building speech_in_reverb ...")
     all_labels += build_speech_in_reverb(
-        test_clean, sim_rirs, rng, counts["speech_in_reverb"], seed, args.dry_run)
+        speech_pool, sim_rirs, rng, counts["speech_in_reverb"], seed, args.dry_run)
 
     print("Building music ...")
     all_labels += build_music(musan_music, rng, counts["music"], seed, args.dry_run, excluded)
@@ -380,18 +454,18 @@ def main() -> None:
         musan_noise, demand, rng, counts["stationary_noise"], seed, args.dry_run, excluded)
 
     print("Building clipped_or_distorted ...")
-    all_labels += build_clipped(test_clean, rng, counts["clipped_or_distorted"], seed, args.dry_run)
+    all_labels += build_clipped(speech_pool, rng, counts["clipped_or_distorted"], seed, args.dry_run)
 
     print("Building low_utility ...")
-    all_labels += build_low_utility(test_clean, rng, counts["low_utility"], seed, args.dry_run)
+    all_labels += build_low_utility(speech_pool, rng, counts["low_utility"], seed, args.dry_run)
 
     if not args.dry_run:
-        LABEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(LABEL_PATH, "w") as f:
+        label_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(label_path, "w") as f:
             for rec in all_labels:
                 f.write(json.dumps(rec) + "\n")
-        print(f"\nLabels written: {LABEL_PATH}  ({len(all_labels)} records)")
-        print(f"Audio written:  {OUT_DIR}/")
+        print(f"\nLabels written: {label_path}  ({len(all_labels)} records)")
+        print(f"Audio written:  {out_dir}/")
     else:
         print(f"\nDry run complete. Would generate {len(all_labels)} examples.")
 
