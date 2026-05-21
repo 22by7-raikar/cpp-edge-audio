@@ -89,6 +89,39 @@ def _extract_features(path: str, cfg: Dict) -> Optional[Tuple[np.ndarray, str]]:
     return np.array(means + maxes + fracs, dtype=np.float32), res["file_decision"]
 
 
+def _extract_all(
+    records: List[Dict],
+    cfg: Dict,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[Dict]]:
+    """Extract features for all records.
+
+    Returns (X, y, gate_preds, valid_entries).  Skips files that fail.
+    gate_preds uses PASS/BORDERLINE -> 1, FAIL -> 0 (rule gate baseline).
+    """
+    X_list:    List[np.ndarray] = []
+    y_list:    List[int]        = []
+    gate_list: List[int]        = []
+    valid:     List[Dict]       = []
+
+    for k, entry in enumerate(records):
+        if k % 100 == 0 and k > 0:
+            print(f"  {k}/{len(records)}", file=sys.stderr, flush=True)
+        out = _extract_features(entry["path"], cfg)
+        if out is None:
+            print(f"  SKIP {os.path.basename(entry['path'])}", file=sys.stderr)
+            continue
+        feat, fdec = out
+        X_list.append(feat)
+        y_list.append(1 if entry["should_transcribe"] == "yes" else 0)
+        gate_list.append(1 if fdec in ("PASS", "BORDERLINE") else 0)
+        valid.append(entry)
+
+    n_feat = len(FEATURE_NAMES)
+    if not X_list:
+        return np.empty((0, n_feat)), np.array([]), np.array([]), []
+    return np.array(X_list), np.array(y_list), np.array(gate_list), valid
+
+
 def _make_split(
     entries: List[Dict],
     train_frac: float,
@@ -160,12 +193,12 @@ def _eval_metrics(
     }
 
 
-def _print_report(results: List[Dict], n_tr: int, n_te: int) -> None:
+def _print_report(results: List[Dict], n_tr: int, n_te: int, mode: str = "") -> None:
     sep = "=" * 72
     print(f"\n{sep}")
     print("QUALITY MODEL EVALUATION  (sklearn prototype)")
     print(sep)
-    print(f"Train: {n_tr}  Test: {n_te}  (split by base_utterance_id, seed={SEED})")
+    print(f"Train: {n_tr}  Test: {n_te}  {mode}")
     print()
 
     hdr = (
@@ -223,12 +256,16 @@ def main() -> None:
                     help=f"Fraction of utterance groups in train (default: {TRAIN_FRAC})")
     ap.add_argument("--seed",       type=int,   default=SEED,
                     help=f"RNG seed (default: {SEED})")
+    ap.add_argument("--train-labels", default=None,
+                    help="Separate training JSONL; if set, --labels is eval-only")
     args = ap.parse_args()
 
     # Resolve relative paths from the repo root (3 levels up from this file).
     _repo = os.path.dirname(os.path.dirname(os.path.dirname(_HERE)))
     if not os.path.isabs(args.labels):
         args.labels = os.path.join(_repo, args.labels)
+    if args.train_labels and not os.path.isabs(args.train_labels):
+        args.train_labels = os.path.join(_repo, args.train_labels)
 
     print(f"Loading labels: {args.labels}", file=sys.stderr)
     records = [json.loads(l) for l in open(args.labels) if l.strip()]
@@ -237,46 +274,41 @@ def main() -> None:
     # -----------------------------------------------------------------------
     # Feature extraction
     # -----------------------------------------------------------------------
-    print(f"Extracting features ({len(records)} files)...", file=sys.stderr)
-    X_list:    List[np.ndarray] = []
-    y_list:    List[int]        = []
-    gate_list: List[int]        = []
-    valid:     List[Dict]       = []
-
-    for k, entry in enumerate(records):
-        if k % 100 == 0:
-            print(f"  {k}/{len(records)}", file=sys.stderr, flush=True)
-        out = _extract_features(entry["path"], cfg)
-        if out is None:
-            print(f"  SKIP {os.path.basename(entry['path'])}", file=sys.stderr)
-            continue
-        feat, fdec = out
-        X_list.append(feat)
-        y_list.append(1 if entry["should_transcribe"] == "yes" else 0)
-        gate_list.append(1 if fdec in ("PASS", "BORDERLINE") else 0)
-        valid.append(entry)
-
-    X          = np.array(X_list)      # (N, 27)
-    y          = np.array(y_list)
-    gate_preds = np.array(gate_list)
-    print(f"  {len(valid)}/{len(records)} files extracted.", file=sys.stderr)
-
-    # -----------------------------------------------------------------------
-    # Train/test split
-    # -----------------------------------------------------------------------
-    tr_idx, te_idx = _make_split(valid, args.train_frac, args.seed)
-    X_tr, X_te = X[tr_idx], X[te_idx]
-    y_tr, y_te = y[tr_idx], y[te_idx]
-    gate_te    = gate_preds[te_idx]
-    te_ents    = [valid[i] for i in te_idx]
-
-    print(
-        f"Train: {len(tr_idx)}"
-        f"  (pos={int(y_tr.sum())} neg={len(y_tr) - int(y_tr.sum())})"
-        f"  Test: {len(te_idx)}"
-        f"  (pos={int(y_te.sum())} neg={len(y_te) - int(y_te.sum())})",
-        file=sys.stderr,
-    )
+    if args.train_labels:
+        # Cross-dataset mode: train on quality_train, eval on eval_subset.
+        print(f"Loading train labels: {args.train_labels}", file=sys.stderr)
+        train_recs = [json.loads(l) for l in open(args.train_labels) if l.strip()]
+        print(f"Extracting train features ({len(train_recs)} files)...", file=sys.stderr)
+        X_tr, y_tr, _, _tr_ents = _extract_all(train_recs, cfg)
+        print(f"  {len(X_tr)}/{len(train_recs)} extracted.", file=sys.stderr)
+        print(f"Extracting eval features ({len(records)} files)...", file=sys.stderr)
+        X_te, y_te, gate_te, te_ents = _extract_all(records, cfg)
+        print(f"  {len(X_te)}/{len(records)} extracted.", file=sys.stderr)
+        n_tr, n_te = len(X_tr), len(X_te)
+        mode = (
+            f"cross-dataset  "
+            f"train={os.path.basename(args.train_labels)} ({n_tr})"
+            f"  eval={os.path.basename(args.labels)} ({n_te})"
+        )
+    else:
+        # Original mode: single dataset split by base_utterance_id.
+        print(f"Extracting features ({len(records)} files)...", file=sys.stderr)
+        X, y, gate_preds, valid = _extract_all(records, cfg)
+        print(f"  {len(valid)}/{len(records)} files extracted.", file=sys.stderr)
+        tr_idx, te_idx = _make_split(valid, args.train_frac, args.seed)
+        X_tr, X_te = X[tr_idx], X[te_idx]
+        y_tr, y_te = y[tr_idx], y[te_idx]
+        gate_te    = gate_preds[te_idx]
+        te_ents    = [valid[i] for i in te_idx]
+        n_tr, n_te = len(X_tr), len(X_te)
+        mode = f"split by base_utterance_id ({args.train_frac:.0%} train, seed={args.seed})"
+        print(
+            f"Train: {n_tr}"
+            f"  (pos={int(y_tr.sum())} neg={n_tr - int(y_tr.sum())})"
+            f"  Test: {n_te}"
+            f"  (pos={int(y_te.sum())} neg={n_te - int(y_te.sum())})",
+            file=sys.stderr,
+        )
 
     # Scaled versions for logistic regression.
     scaler  = StandardScaler().fit(X_tr)
@@ -328,7 +360,7 @@ def main() -> None:
             }
         all_results.append(mr)
 
-    _print_report(all_results, len(tr_idx), len(te_idx))
+    _print_report(all_results, n_tr, n_te, mode)
 
     # -----------------------------------------------------------------------
     # Save
@@ -343,9 +375,10 @@ def main() -> None:
                 {
                     "ts":           ts,
                     "n_records":    len(records),
-                    "n_valid":      len(valid),
-                    "train_n":      len(tr_idx),
-                    "test_n":       len(te_idx),
+                    "train_labels": args.train_labels,
+                    "train_n":      n_tr,
+                    "test_n":       n_te,
+                    "mode":         mode,
                     "train_frac":   args.train_frac,
                     "seed":         args.seed,
                     "chunk_sec":    CHUNK_SEC,
