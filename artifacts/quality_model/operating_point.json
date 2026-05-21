@@ -1,0 +1,11 @@
+{
+  "ts": "20260521_015515",
+  "model": "gbt",
+  "threshold": 0.3,
+  "far": 0.09,
+  "frr": 0.044,
+  "f1": 0.9428,
+  "music_fa": 16,
+  "clean_speech_fr": 5,
+  "note": "balanced = argmax F1 over threshold sweep"
+}

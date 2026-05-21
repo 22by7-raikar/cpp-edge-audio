@@ -31,6 +31,7 @@ import argparse
 import datetime
 import json
 import os
+import subprocess
 import sys
 from typing import Dict, List, Optional, Tuple
 
@@ -44,6 +45,7 @@ try:
     from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
     from sklearn.linear_model import LogisticRegression
     from sklearn.preprocessing import StandardScaler
+    import joblib
 except ImportError:
     print(
         "ERROR: scikit-learn not installed.\n"
@@ -331,6 +333,195 @@ def _print_ops_summary(ops_by_model: Dict[str, Dict], rule_metrics: Dict) -> Non
     print()
 
 
+def _git_hash() -> str:
+    """Return short git commit hash, or 'unknown'."""
+    try:
+        return subprocess.check_output(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+    except Exception:
+        return 'unknown'
+
+
+def _load_artifact(artifact_dir: str) -> Tuple[object, Optional[object], Dict]:
+    """Load (clf, scaler_or_None, schema) from an artifact directory."""
+    schema_path = os.path.join(artifact_dir, 'feature_schema.json')
+    model_path  = os.path.join(artifact_dir, 'quality_gbt.joblib')
+    with open(schema_path) as fh:
+        schema = json.load(fh)
+    payload = joblib.load(model_path)
+    return payload['clf'], payload.get('scaler'), schema
+
+
+def _eval_from_artifact(artifact_dir: str, label_path: str, cfg: Dict) -> None:
+    """Load a saved artifact and report FAR/FRR/F1 on label_path."""
+    clf, scaler, schema = _load_artifact(artifact_dir)
+    threshold = schema['threshold']
+    print(f"Loaded {schema['model_type']} from {artifact_dir}", file=sys.stderr)
+    print(f"Threshold: {threshold}  git={schema['git_commit']}", file=sys.stderr)
+
+    records = [json.loads(line) for line in open(label_path) if line.strip()]
+    print(f"Extracting features ({len(records)} files)...", file=sys.stderr)
+    X, y, _gate, entries = _extract_all(records, cfg)
+    print(f"  {len(X)}/{len(records)} extracted.", file=sys.stderr)
+
+    X_eval = scaler.transform(X) if scaler is not None else X
+    proba  = clf.predict_proba(X_eval)[:, 1]
+    y_pred = (proba >= threshold).astype(int)
+    m = _eval_metrics(y, y_pred, entries)
+
+    sep = '=' * 72
+    print(f'\n{sep}')
+    print('ARTIFACT EVALUATION')
+    print(sep)
+    print(f"  Model:    {schema['model_type']}  threshold={threshold}")
+    print(f"  Git:      {schema['git_commit']}")
+    print(f"  Train:    {schema.get('train_labels', 'n/a')}")
+    print(f"  Eval:     {label_path}")
+    print()
+    hdr = (
+        f"  {'FAR':>6}  {'FRR':>6}  {'P':>6}  {'R':>6}  "
+        f"{'F1':>6}  {'MusicFA':>8}  {'CleanFR':>8}"
+    )
+    print(hdr)
+    print('  ' + '-' * (len(hdr) - 2))
+    print(
+        f"  {m['far']:>6.4f}  {m['frr']:>6.4f}  {m['precision']:>6.4f}  "
+        f"{m['recall']:>6.4f}  {m['f1']:>6.4f}  "
+        f"{m['music_fa']:>8d}  {m['clean_speech_fr']:>8d}"
+    )
+    print()
+    print('Per-label false decisions [fp / fn]:')
+    for lbl in sorted(m['per_label']):
+        pl = m['per_label'][lbl]
+        print(f"  {lbl:30s}  {pl['fp']:>3}/{pl['fn']:<3}")
+    print()
+
+
+def _save_artifact(
+    clf,
+    scaler,
+    gbt_result: Dict,
+    sweep_rows: List[Dict],
+    ops: Dict,
+    y_te: np.ndarray,
+    y_proba: np.ndarray,
+    te_ents: List[Dict],
+    threshold: float,
+    artifact_dir: str,
+    ts: str,
+    args,
+    git_hash: str,
+) -> None:
+    """Save GBT model, feature schema, operating point, metrics, and error analysis."""
+    os.makedirs(artifact_dir, exist_ok=True)
+
+    # quality_gbt.joblib
+    model_path = os.path.join(artifact_dir, 'quality_gbt.joblib')
+    joblib.dump({'clf': clf, 'scaler': scaler}, model_path)
+    print(f"Saved: {model_path}", file=sys.stderr)
+
+    # feature_schema.json
+    hp = clf.get_params()
+    schema = {
+        'ts':            ts,
+        'git_commit':    git_hash,
+        'model_type':    type(clf).__name__,
+        'feature_names': FEATURE_NAMES,
+        'n_features':    len(FEATURE_NAMES),
+        'metric_keys':   METRIC_KEYS,
+        'chunk_sec':     CHUNK_SEC,
+        'aggregation':   'mean+max per chunk, then gate decision fractions',
+        'label_target':  'should_transcribe == yes',
+        'threshold':     threshold,
+        'hyperparameters': {
+            k: hp[k] for k in ('n_estimators', 'max_depth', 'learning_rate', 'random_state')
+        },
+        'seed':          args.seed,
+        'train_labels':  args.train_labels,
+        'eval_labels':   args.labels,
+    }
+    schema_path = os.path.join(artifact_dir, 'feature_schema.json')
+    with open(schema_path, 'w') as fh:
+        json.dump(schema, fh, indent=2)
+    print(f"Saved: {schema_path}", file=sys.stderr)
+
+    # operating_point.json
+    op_row = ops.get('balanced', sweep_rows[0]) if ops else sweep_rows[0]
+    op_path = os.path.join(artifact_dir, 'operating_point.json')
+    with open(op_path, 'w') as fh:
+        json.dump(
+            {
+                'ts':              ts,
+                'model':           'gbt',
+                'threshold':       threshold,
+                'far':             op_row['far'],
+                'frr':             op_row['frr'],
+                'f1':              op_row['f1'],
+                'music_fa':        op_row['music_fa'],
+                'clean_speech_fr': op_row['clean_speech_fr'],
+                'note':            'balanced = argmax F1 over threshold sweep',
+            },
+            fh,
+            indent=2,
+        )
+    print(f"Saved: {op_path}", file=sys.stderr)
+
+    # metrics.json
+    metrics_path = os.path.join(artifact_dir, 'metrics.json')
+    with open(metrics_path, 'w') as fh:
+        json.dump(
+            {
+                'ts':        ts,
+                'model':     'gbt',
+                'threshold': threshold,
+                'metrics':   gbt_result['metrics'],
+            },
+            fh,
+            indent=2,
+        )
+    print(f"Saved: {metrics_path}", file=sys.stderr)
+
+    # false_accepts.csv and false_rejects.csv
+    y_pred_bin = (y_proba >= threshold).astype(int)
+    for csv_name, mask in (
+        ('false_accepts.csv', (y_pred_bin == 1) & (y_te == 0)),
+        ('false_rejects.csv', (y_pred_bin == 0) & (y_te == 1)),
+    ):
+        csv_path = os.path.join(artifact_dir, csv_name)
+        with open(csv_path, 'w') as fh:
+            fh.write('path,label,should_transcribe,proba\n')
+            for i, e in enumerate(te_ents):
+                if mask[i]:
+                    fh.write(
+                        f"{e['path']},{e['label']},"
+                        f"{e.get('should_transcribe', '')},"
+                        f"{y_proba[i]:.4f}\n"
+                    )
+        print(f"Saved: {csv_path}", file=sys.stderr)
+
+    # threshold_sweep.tsv
+    tsv_path = os.path.join(artifact_dir, 'threshold_sweep.tsv')
+    with open(tsv_path, 'w') as fh:
+        fh.write('model\tthreshold\tfar\tfrr\tprecision\trecall\tf1\tmusic_fa\tclean_speech_fr\n')
+        for row in sweep_rows:
+            fh.write(
+                f"{row['model']}\t{row['threshold']}\t"
+                f"{row['far']}\t{row['frr']}\t"
+                f"{row['precision']}\t{row['recall']}\t{row['f1']}\t"
+                f"{row['music_fa']}\t{row['clean_speech_fr']}\n"
+            )
+    print(f"Saved: {tsv_path}", file=sys.stderr)
+
+    # feature_importance.json
+    if 'feature_importances' in gbt_result:
+        fi_path = os.path.join(artifact_dir, 'feature_importance.json')
+        with open(fi_path, 'w') as fh:
+            json.dump(gbt_result['feature_importances'], fh, indent=2)
+        print(f"Saved: {fi_path}", file=sys.stderr)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description=__doc__,
@@ -346,6 +537,10 @@ def main() -> None:
                     help=f"RNG seed (default: {SEED})")
     ap.add_argument("--train-labels", default=None,
                     help="Separate training JSONL; if set, --labels is eval-only")
+    ap.add_argument("--save-artifact", default=None, metavar="DIR",
+                    help="Save best GBT artifact to DIR (joblib + schema + operating point + metrics)")
+    ap.add_argument("--eval-artifact", default=None, metavar="DIR",
+                    help="Load artifact from DIR and evaluate on --labels; skip training")
     args = ap.parse_args()
 
     # Resolve relative paths from the repo root (3 levels up from this file).
@@ -354,6 +549,13 @@ def main() -> None:
         args.labels = os.path.join(_repo, args.labels)
     if args.train_labels and not os.path.isabs(args.train_labels):
         args.train_labels = os.path.join(_repo, args.train_labels)
+
+    # Eval-from-artifact mode: load saved model and evaluate, no training.
+    if args.eval_artifact:
+        adir = args.eval_artifact if os.path.isabs(args.eval_artifact) \
+            else os.path.join(_repo, args.eval_artifact)
+        _eval_from_artifact(adir, args.labels, dict(gate_eval.DEFAULT_CONFIG))
+        return
 
     print(f"Loading labels: {args.labels}", file=sys.stderr)
     records = [json.loads(l) for l in open(args.labels) if l.strip()]
@@ -512,13 +714,41 @@ def main() -> None:
     if ops_by_model:
         _print_ops_summary(ops_by_model, rule_metrics)
 
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # -----------------------------------------------------------------------
+    # Artifact save (--save-artifact)
+    # -----------------------------------------------------------------------
+    if args.save_artifact:
+        adir = args.save_artifact if os.path.isabs(args.save_artifact) \
+            else os.path.join(_repo, args.save_artifact)
+        gbt_clf    = next(clf for (name, clf, _) in model_specs if name == "gbt")
+        gbt_result = next(r for r in all_results if r["name"] == "gbt")
+        gbt_sweep  = [r for r in sweep_all if r["model"] == "gbt"]
+        gbt_ops    = ops_by_model.get("gbt", {})
+        threshold  = gbt_ops.get("balanced", {}).get("threshold", 0.5) if gbt_ops else 0.5
+        _save_artifact(
+            clf=gbt_clf,
+            scaler=None,
+            gbt_result=gbt_result,
+            sweep_rows=gbt_sweep,
+            ops=gbt_ops,
+            y_te=y_te,
+            y_proba=gbt_clf.predict_proba(X_te)[:, 1],
+            te_ents=te_ents,
+            threshold=threshold,
+            artifact_dir=adir,
+            ts=ts,
+            args=args,
+            git_hash=_git_hash(),
+        )
+
     # -----------------------------------------------------------------------
     # Save
     # -----------------------------------------------------------------------
     if args.out:
         out_dir = args.out if os.path.isabs(args.out) else os.path.join(_repo, args.out)
         os.makedirs(out_dir, exist_ok=True)
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
         # model_comparison.json
         mc_path = os.path.join(out_dir, f"model_comparison_{ts}.json")

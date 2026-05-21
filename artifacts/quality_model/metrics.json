@@ -1,0 +1,62 @@
+{
+  "ts": "20260521_015515",
+  "model": "gbt",
+  "threshold": 0.3,
+  "metrics": {
+    "tp": 230,
+    "fp": 13,
+    "tn": 187,
+    "fn": 20,
+    "far": 0.065,
+    "frr": 0.08,
+    "precision": 0.9465,
+    "recall": 0.92,
+    "f1": 0.9331,
+    "music_fa": 11,
+    "clean_speech_fr": 7,
+    "per_label": {
+      "clean_speech": {
+        "tp": 93,
+        "fp": 0,
+        "tn": 0,
+        "fn": 7
+      },
+      "speech_in_noise": {
+        "tp": 87,
+        "fp": 0,
+        "tn": 0,
+        "fn": 13
+      },
+      "speech_in_reverb": {
+        "tp": 50,
+        "fp": 0,
+        "tn": 0,
+        "fn": 0
+      },
+      "music": {
+        "tp": 0,
+        "fp": 11,
+        "tn": 39,
+        "fn": 0
+      },
+      "stationary_noise": {
+        "tp": 0,
+        "fp": 0,
+        "tn": 50,
+        "fn": 0
+      },
+      "clipped_or_distorted": {
+        "tp": 0,
+        "fp": 2,
+        "tn": 48,
+        "fn": 0
+      },
+      "low_utility": {
+        "tp": 0,
+        "fp": 0,
+        "tn": 50,
+        "fn": 0
+      }
+    }
+  }
+}
