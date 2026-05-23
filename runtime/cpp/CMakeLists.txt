@@ -91,6 +91,7 @@ add_executable(audio_pipeline
     src/main.cpp
     src/audio/audio_io.cpp
     src/chunker/chunker.cpp
+    src/chunker/vad.cpp
     src/gate/features.cpp
     src/gate/gate.cpp
     src/asr/asr.cpp
@@ -143,6 +144,7 @@ if(BUILD_TESTS)
     add_library(pipeline_modules OBJECT
         src/audio/audio_io.cpp
         src/chunker/chunker.cpp
+        src/chunker/vad.cpp
         src/gate/features.cpp
         src/gate/gate.cpp
         src/scene/scene.cpp

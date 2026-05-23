@@ -21,6 +21,7 @@
 //   --bench-json    / -j   <path>    Write JSON benchmark file (per-chunk + summary)
 //   --language             <str>     Language hint for Whisper (default: en)
 //   --gate-only                      Run gate + scene only; skip ASR (--model not required)
+//   --vad-only                       Run DSP VAD segmentation only; print JSON to stdout
 //
 // TODO(future): microphone capture path.
 
@@ -33,6 +34,7 @@
 #include "audio/audio_io.h"
 #include "asr/asr.h"
 #include "chunker/chunker.h"
+#include "chunker/vad.h"
 #include "gate/gate.h"
 #include "logging/logger.h"
 #include "scene/scene.h"
@@ -67,6 +69,7 @@ struct CliArgs {
     bool        gate_enabled     = true;
     bool        adaptive_enabled  = true;
     bool        gate_only         = false;  // skip ASR, model not required
+    bool        vad_only          = false;  // run VAD only, print JSON to stdout
 };
 
 bool parse_args(int argc, char** argv, CliArgs& out) {
@@ -96,6 +99,7 @@ bool parse_args(int argc, char** argv, CliArgs& out) {
         else if (a == "--no-gate")                  out.gate_enabled = false;
         else if (a == "--no-adapt")                 out.adaptive_enabled = false;
         else if (a == "--gate-only")                out.gate_only = true;
+        else if (a == "--vad-only")                 out.vad_only  = true;
         else {
             std::cerr << "Unknown argument: " << a << "\n";
             return false;
@@ -106,8 +110,8 @@ bool parse_args(int argc, char** argv, CliArgs& out) {
         std::cerr << "ERROR: --input is required.\n";
         return false;
     }
-    if (!out.gate_only && out.model_path.empty()) {
-        std::cerr << "ERROR: --model is required unless --gate-only is set.\n";
+    if (!out.gate_only && !out.vad_only && out.model_path.empty()) {
+        std::cerr << "ERROR: --model is required unless --gate-only or --vad-only is set.\n";
         return false;
     }
     return true;
@@ -160,6 +164,45 @@ int main(int argc, char** argv) {
         std::cerr << "Resampling from " << audio.sample_rate
                   << " Hz to " << WHISPER_SR << " Hz...\n";
         audio = pipeline::resample(audio, WHISPER_SR);
+    }
+
+    // -----------------------------------------------------------
+    // --vad-only: run VAD, print JSON, exit
+    // -----------------------------------------------------------
+    if (args.vad_only) {
+        pipeline::VadConfig vad_cfg;
+        const auto segs = pipeline::run_vad(
+            audio.samples.data(),
+            static_cast<int>(audio.samples.size()),
+            audio.sample_rate,
+            vad_cfg);
+
+        double speech_dur = 0.0;
+        for (const auto& s : segs) speech_dur += s.duration_sec();
+
+        const double total_dur = audio.duration_sec();
+        const double speech_frac = (total_dur > 0.0) ? speech_dur / total_dur : 0.0;
+
+        std::printf("{\n");
+        std::printf("  \"input\": \"%s\",\n", args.input_path.c_str());
+        std::printf("  \"sample_rate\": %d,\n", audio.sample_rate);
+        std::printf("  \"total_duration_sec\": %.4f,\n", total_dur);
+        std::printf("  \"n_segments\": %zu,\n", segs.size());
+        std::printf("  \"speech_duration_sec\": %.4f,\n", speech_dur);
+        std::printf("  \"speech_fraction\": %.4f,\n", speech_frac);
+        std::printf("  \"vad_segments\": [\n");
+        for (size_t i = 0; i < segs.size(); ++i) {
+            const auto& s = segs[i];
+            std::printf(
+                "    {\"start_sec\": %.4f, \"end_sec\": %.4f,"
+                " \"duration_sec\": %.4f, \"speech_ratio\": %.4f,"
+                " \"frame_count\": %d}%s\n",
+                s.start_sec, s.end_sec, s.duration_sec(),
+                s.speech_ratio, s.frame_count,
+                (i + 1 < segs.size()) ? "," : "");
+        }
+        std::printf("  ]\n}\n");
+        return 0;
     }
 
     // -----------------------------------------------------------
