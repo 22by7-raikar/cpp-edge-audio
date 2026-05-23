@@ -22,6 +22,7 @@
 //   --language             <str>     Language hint for Whisper (default: en)
 //   --gate-only                      Run gate + scene only; skip ASR (--model not required)
 //   --vad-only                       Run DSP VAD segmentation only; print JSON to stdout
+//   --vad-asr                        Use VAD segmentation instead of fixed-window chunking; gate + ASR still run
 //
 // TODO(future): microphone capture path.
 
@@ -70,6 +71,7 @@ struct CliArgs {
     bool        adaptive_enabled  = true;
     bool        gate_only         = false;  // skip ASR, model not required
     bool        vad_only          = false;  // run VAD only, print JSON to stdout
+    bool        vad_asr           = false;  // VAD segmentation instead of fixed-window chunking
 };
 
 bool parse_args(int argc, char** argv, CliArgs& out) {
@@ -100,6 +102,7 @@ bool parse_args(int argc, char** argv, CliArgs& out) {
         else if (a == "--no-adapt")                 out.adaptive_enabled = false;
         else if (a == "--gate-only")                out.gate_only = true;
         else if (a == "--vad-only")                 out.vad_only  = true;
+        else if (a == "--vad-asr")                  out.vad_asr   = true;
         else {
             std::cerr << "Unknown argument: " << a << "\n";
             return false;
@@ -110,7 +113,7 @@ bool parse_args(int argc, char** argv, CliArgs& out) {
         std::cerr << "ERROR: --input is required.\n";
         return false;
     }
-    if (!out.gate_only && !out.vad_only && out.model_path.empty()) {
+    if (!out.gate_only && !out.vad_only && !out.vad_asr && out.model_path.empty()) {
         std::cerr << "ERROR: --model is required unless --gate-only or --vad-only is set.\n";
         return false;
     }
@@ -206,12 +209,41 @@ int main(int argc, char** argv) {
     }
 
     // -----------------------------------------------------------
-    // Chunker
+    // Build chunk list: fixed-window or VAD-based
     // -----------------------------------------------------------
-    pipeline::ChunkerConfig chunk_cfg;
-    chunk_cfg.chunk_ms = args.chunk_ms;
-    chunk_cfg.hop_ms   = args.hop_ms;
-    const auto chunks = pipeline::chunk_audio(audio, chunk_cfg);
+    std::vector<pipeline::Chunk> chunks;
+    if (args.vad_asr) {
+        pipeline::VadConfig vad_cfg;
+        const auto segs = pipeline::run_vad(
+            audio.samples.data(),
+            static_cast<int>(audio.samples.size()),
+            audio.sample_rate,
+            vad_cfg);
+        std::cerr << "[vad-asr] " << segs.size() << " VAD segments\n";
+        chunks.reserve(segs.size());
+        for (size_t i = 0; i < segs.size(); ++i) {
+            const auto& seg = segs[i];
+            const int s_idx = std::max(0,
+                static_cast<int>(seg.start_sec * audio.sample_rate));
+            const int e_idx = std::min(
+                static_cast<int>(audio.samples.size()),
+                static_cast<int>(seg.end_sec   * audio.sample_rate));
+            pipeline::Chunk c;
+            c.sample_rate = audio.sample_rate;
+            c.index       = static_cast<int>(i);
+            c.start_sec   = seg.start_sec;
+            c.end_sec     = seg.end_sec;
+            if (s_idx < e_idx)
+                c.samples.assign(audio.samples.begin() + s_idx,
+                                 audio.samples.begin() + e_idx);
+            chunks.push_back(std::move(c));
+        }
+    } else {
+        pipeline::ChunkerConfig chunk_cfg;
+        chunk_cfg.chunk_ms = args.chunk_ms;
+        chunk_cfg.hop_ms   = args.hop_ms;
+        chunks = pipeline::chunk_audio(audio, chunk_cfg);
+    }
 
     // -----------------------------------------------------------
     // Gate config
