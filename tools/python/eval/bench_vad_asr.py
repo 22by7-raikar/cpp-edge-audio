@@ -131,9 +131,10 @@ def audio_to_wav(src_path: str, tmpdir: str) -> str:
 # ---------------------------------------------------------------------------
 
 MODES: List[Tuple[str, List[str], str]] = [
-    ("fixed",    [],                         "fixed-window + gate"),
-    ("vad_gate", ["--vad-asr"],              "VAD + gate"),
-    ("vad_open", ["--vad-asr", "--no-gate"], "VAD, no gate"),
+    ("fixed",      [],                          "fixed-window + gate"),
+    ("vad_gate",   ["--vad-asr"],               "VAD + gate"),
+    ("vad_packed", ["--vad-asr-packed"],         "VAD packed + gate"),
+    ("vad_open",   ["--vad-asr", "--no-gate"],   "VAD, no gate"),
 ]
 
 
@@ -417,33 +418,38 @@ def main() -> None:
     # -----------------------------------------------------------------------
     # Key comparison: VAD savings vs fixed
     # -----------------------------------------------------------------------
-    fixed_row = next((r for r in summary_rows if r["mode"] == "fixed"), None)
-    vadg_row  = next((r for r in summary_rows if r["mode"] == "vad_gate"), None)
-    if fixed_row and vadg_row:
-        audio_saved_sec = fixed_row["asr_sec"] - vadg_row["asr_sec"]
-        audio_saved_pct = audio_saved_sec / fixed_row["asr_sec"] * 100.0 \
-            if fixed_row["asr_sec"] > 0 else 0.0
-        infer_delta_ms  = vadg_row["infer_ms"] - fixed_row["infer_ms"]
-        infer_delta_pct = infer_delta_ms / fixed_row["infer_ms"] * 100.0 \
-            if fixed_row["infer_ms"] > 0 else 0.0
-        print()
-        print(f"VAD+gate vs fixed:")
-        print(f"  Audio to ASR:     {fixed_row['asr_sec']:.1f}s (fixed)  vs  "
-              f"{vadg_row['asr_sec']:.1f}s (VAD+gate)  "
+    fixed_row  = next((r for r in summary_rows if r["mode"] == "fixed"),      None)
+    vadg_row   = next((r for r in summary_rows if r["mode"] == "vad_gate"),   None)
+    vadpk_row  = next((r for r in summary_rows if r["mode"] == "vad_packed"), None)
+
+    def _compare(label: str, baseline: Dict, other: Dict) -> None:
+        audio_saved_sec = baseline["asr_sec"] - other["asr_sec"]
+        audio_saved_pct = audio_saved_sec / baseline["asr_sec"] * 100.0 \
+            if baseline["asr_sec"] > 0 else 0.0
+        infer_delta_ms  = other["infer_ms"] - baseline["infer_ms"]
+        infer_delta_pct = infer_delta_ms / baseline["infer_ms"] * 100.0 \
+            if baseline["infer_ms"] > 0 else 0.0
+        direction = "saved" if infer_delta_ms < 0 else "overhead"
+        print(f"\n{label}:")
+        print(f"  Audio to ASR:    {baseline['asr_sec']:.1f}s  ->  {other['asr_sec']:.1f}s  "
               f"({audio_saved_sec:.1f}s less, {audio_saved_pct:.1f}% reduction)")
-        if fixed_row["infer_ms"] > 0:
-            direction = "saved" if infer_delta_ms < 0 else "overhead"
-            print(f"  Inference time:   {fixed_row['infer_ms']:.0f}ms (fixed)  vs  "
-                  f"{vadg_row['infer_ms']:.0f}ms (VAD+gate)  "
+        if baseline["infer_ms"] > 0:
+            print(f"  Inference time:  {baseline['infer_ms']:.0f}ms  ->  {other['infer_ms']:.0f}ms  "
                   f"({abs(infer_delta_ms):.0f}ms {direction}, "
                   f"{abs(infer_delta_pct):.1f}% {'faster' if infer_delta_ms < 0 else 'slower'})")
-            print(f"  RTF:              {fixed_row['rtf']:.4f} (fixed)  vs  "
-                  f"{vadg_row['rtf']:.4f} (VAD+gate)")
-        if fixed_row.get("avg_wer") is not None and vadg_row.get("avg_wer") is not None:
-            wer_delta = vadg_row["avg_wer"] - fixed_row["avg_wer"]
-            print(f"  WER (clean):      {fixed_row['avg_wer']:.3f} (fixed)  vs  "
-                  f"{vadg_row['avg_wer']:.3f} (VAD+gate)  "
+            print(f"  RTF:             {baseline['rtf']:.4f}  ->  {other['rtf']:.4f}")
+        if baseline.get("avg_wer") is not None and other.get("avg_wer") is not None:
+            wer_delta = other["avg_wer"] - baseline["avg_wer"]
+            print(f"  WER (clean):     {baseline['avg_wer']:.3f}  ->  {other['avg_wer']:.3f}  "
                   f"(delta={wer_delta:+.3f})")
+        print(f"  ASR calls:       {baseline['n_asr_calls']}  ->  {other['n_asr_calls']}")
+
+    if fixed_row and vadg_row:
+        _compare("vad_gate vs fixed", fixed_row, vadg_row)
+    if fixed_row and vadpk_row:
+        _compare("vad_packed vs fixed", fixed_row, vadpk_row)
+    if vadg_row and vadpk_row:
+        _compare("vad_packed vs vad_gate (raw)", vadg_row, vadpk_row)
 
     # -----------------------------------------------------------------------
     # Save outputs

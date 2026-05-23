@@ -143,4 +143,84 @@ std::vector<VadSegment> run_vad(
     return result;
 }
 
+// -----------------------------------------------------------------
+// pack_vad_segments
+// -----------------------------------------------------------------
+std::vector<VadSegment> pack_vad_segments(
+    const std::vector<VadSegment>& segs,
+    double               audio_dur_sec,
+    const VadPackConfig& cfg)
+{
+    if (segs.empty()) return {};
+
+    const double pre_pad  = cfg.pre_pad_ms    / 1000.0;
+    const double post_pad = cfg.post_pad_ms   / 1000.0;
+    const double gap_max  = cfg.merge_gap_ms  / 1000.0;
+    const double win_min  = cfg.min_window_ms / 1000.0;
+    const double win_max  = cfg.max_window_ms / 1000.0;
+
+    // Step 1 — apply pre/post padding to each segment.
+    // Keep raw [rs, re] for speech_ratio computation.
+    struct PSeg { double ps; double pe; double rs; double re; };
+    std::vector<PSeg> padded;
+    padded.reserve(segs.size());
+    for (const auto& s : segs) {
+        padded.push_back({
+            std::max(0.0, s.start_sec - pre_pad),
+            std::min(audio_dur_sec, s.end_sec + post_pad),
+            s.start_sec, s.end_sec
+        });
+    }
+
+    // Step 2 — greedy merge with hard cap at max_window_ms.
+    struct Win { double s; double e; double speech_sec; };
+    std::vector<Win> windows;
+    windows.push_back({padded[0].ps, padded[0].pe,
+                       padded[0].re - padded[0].rs});
+
+    for (size_t i = 1; i < padded.size(); ++i) {
+        Win& cur = windows.back();
+        const bool gap_ok  = padded[i].ps <= cur.e + gap_max;
+        const bool size_ok = (padded[i].pe - cur.s) <= win_max;
+        if (gap_ok && size_ok) {
+            if (padded[i].pe > cur.e) cur.e = padded[i].pe;
+            cur.speech_sec += padded[i].re - padded[i].rs;
+        } else {
+            windows.push_back({padded[i].ps, padded[i].pe,
+                                padded[i].re - padded[i].rs});
+        }
+    }
+
+    // Step 3 — extend windows shorter than min_window_ms.
+    for (Win& w : windows) {
+        const double dur = w.e - w.s;
+        if (dur < win_min) {
+            const double extend = win_min - dur;
+            // try to split extension equally on both sides
+            const double ext_post = std::min(audio_dur_sec - w.e, extend / 2.0);
+            const double ext_pre  = std::min(w.s, extend - ext_post);
+            // if post side is saturated take more from pre
+            const double ext_post2 = std::min(audio_dur_sec - w.e, extend - ext_pre);
+            w.s = std::max(0.0, w.s - ext_pre);
+            w.e = std::min(audio_dur_sec, w.e + ext_post2);
+        }
+    }
+
+    // Step 4 — convert to VadSegment.
+    std::vector<VadSegment> result;
+    result.reserve(windows.size());
+    for (const Win& w : windows) {
+        VadSegment vs;
+        vs.start_sec  = w.s;
+        vs.end_sec    = w.e;
+        const double dur = w.e - w.s;
+        vs.speech_ratio = (dur > 0.0)
+            ? static_cast<float>(w.speech_sec / dur)
+            : 0.0f;
+        vs.frame_count  = static_cast<int>(dur * 1000.0 / 10.0);  // approx, hop=10ms
+        result.push_back(vs);
+    }
+    return result;
+}
+
 }  // namespace pipeline

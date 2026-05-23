@@ -50,4 +50,33 @@ std::vector<VadSegment> run_vad(
     int              sample_rate,
     const VadConfig& cfg = VadConfig{});
 
+// -------------------------------------------------------
+// VAD segment packing
+//
+// Reduces CUDA per-call overhead by merging nearby VAD segments
+// into wider ASR windows with context padding.
+// -------------------------------------------------------
+struct VadPackConfig {
+    int pre_pad_ms    = 200;   // silence context prepended before each speech region
+    int post_pad_ms   = 300;   // silence context appended after each speech region
+    int merge_gap_ms  = 600;   // merge consecutive windows when gap <= this after padding
+    int min_window_ms = 1500;  // extend windows shorter than this (reduces micro-call overhead)
+    int max_window_ms = 7000;  // hard cap per window; start new window if exceeded
+};
+
+// Pack raw VAD segments into wider ASR windows.
+//
+// Steps:
+//   1. Add pre/post padding to each segment, clipped to [0, audio_dur_sec].
+//   2. Greedily merge adjacent padded windows if their gap <= merge_gap_ms
+//      and the merged window would not exceed max_window_ms.
+//   3. Extend short windows to min_window_ms.
+//
+// speech_ratio in output reflects raw speech time / window duration.
+// frame_count is approximate (window_ms / hop_ms).
+std::vector<VadSegment> pack_vad_segments(
+    const std::vector<VadSegment>& segs,
+    double              audio_dur_sec,
+    const VadPackConfig& cfg = VadPackConfig{});
+
 }  // namespace pipeline

@@ -23,6 +23,7 @@
 //   --gate-only                      Run gate + scene only; skip ASR (--model not required)
 //   --vad-only                       Run DSP VAD segmentation only; print JSON to stdout
 //   --vad-asr                        Use VAD segmentation instead of fixed-window chunking; gate + ASR still run
+//   --vad-asr-packed                 VAD segmentation with padding + merging to wider ASR windows (fewer CUDA calls)
 //
 // TODO(future): microphone capture path.
 
@@ -72,6 +73,7 @@ struct CliArgs {
     bool        gate_only         = false;  // skip ASR, model not required
     bool        vad_only          = false;  // run VAD only, print JSON to stdout
     bool        vad_asr           = false;  // VAD segmentation instead of fixed-window chunking
+    bool        vad_asr_packed     = false;  // VAD + padding/merge packing before ASR
 };
 
 bool parse_args(int argc, char** argv, CliArgs& out) {
@@ -102,7 +104,8 @@ bool parse_args(int argc, char** argv, CliArgs& out) {
         else if (a == "--no-adapt")                 out.adaptive_enabled = false;
         else if (a == "--gate-only")                out.gate_only = true;
         else if (a == "--vad-only")                 out.vad_only  = true;
-        else if (a == "--vad-asr")                  out.vad_asr   = true;
+        else if (a == "--vad-asr")                  out.vad_asr        = true;
+        else if (a == "--vad-asr-packed")             out.vad_asr_packed = true;
         else {
             std::cerr << "Unknown argument: " << a << "\n";
             return false;
@@ -113,7 +116,7 @@ bool parse_args(int argc, char** argv, CliArgs& out) {
         std::cerr << "ERROR: --input is required.\n";
         return false;
     }
-    if (!out.gate_only && !out.vad_only && !out.vad_asr && out.model_path.empty()) {
+    if (!out.gate_only && !out.vad_only && !out.vad_asr && !out.vad_asr_packed && out.model_path.empty()) {
         std::cerr << "ERROR: --model is required unless --gate-only or --vad-only is set.\n";
         return false;
     }
@@ -212,14 +215,28 @@ int main(int argc, char** argv) {
     // Build chunk list: fixed-window or VAD-based
     // -----------------------------------------------------------
     std::vector<pipeline::Chunk> chunks;
-    if (args.vad_asr) {
+    if (args.vad_asr || args.vad_asr_packed) {
         pipeline::VadConfig vad_cfg;
-        const auto segs = pipeline::run_vad(
+        const auto raw_segs = pipeline::run_vad(
             audio.samples.data(),
             static_cast<int>(audio.samples.size()),
             audio.sample_rate,
             vad_cfg);
-        std::cerr << "[vad-asr] " << segs.size() << " VAD segments\n";
+
+        // Optionally pack raw segments into wider ASR windows.
+        const std::vector<pipeline::VadSegment>& segs =
+            args.vad_asr_packed
+            ? pipeline::pack_vad_segments(
+                  raw_segs,
+                  audio.duration_sec())
+            : raw_segs;
+
+        std::cerr << (args.vad_asr_packed ? "[vad-packed] " : "[vad-asr] ")
+                  << raw_segs.size() << " raw segments";
+        if (args.vad_asr_packed)
+            std::cerr << " -> " << segs.size() << " packed windows";
+        std::cerr << "\n";
+
         chunks.reserve(segs.size());
         for (size_t i = 0; i < segs.size(); ++i) {
             const auto& seg = segs[i];
