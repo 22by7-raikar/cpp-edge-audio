@@ -51,6 +51,28 @@ MAN_DIR = REPO_ROOT / "data" / "manifests"
 OUT_DIR = REPO_ROOT / "data" / "processed" / "eval_subset"
 LABEL_PATH = REPO_ROOT / "data" / "labels" / "eval_subset.jsonl"
 
+
+def _to_rel(path) -> str:
+    """Return path as a repo-relative string if it is under REPO_ROOT, else unchanged."""
+    if not path:
+        return str(path) if path is not None else ""
+    try:
+        return str(Path(path).relative_to(REPO_ROOT))
+    except (ValueError, TypeError):
+        return str(path)
+
+
+def resolve_path(path: str) -> Path:
+    """Resolve a path string to an absolute Path.
+
+    Repo-relative strings (e.g. 'data/processed/...') are joined with
+    REPO_ROOT.  Absolute paths pass through unchanged.  Supports JSONL
+    files written both before (absolute) and after (relative) this change.
+    """
+    p = Path(path)
+    return p if p.is_absolute() else REPO_ROOT / p
+
+
 TARGET_SR = 16000
 CHUNK_SEC = 5
 
@@ -122,6 +144,10 @@ def load_manifest(path: Path) -> list[dict]:
             rec = normalize_manifest_record(json.loads(line))
             if "path" not in rec:
                 continue
+            # Support both old (absolute) and new (repo-relative) JSONL files.
+            if not Path(rec["path"]).is_absolute():
+                rec = dict(rec)
+                rec["path"] = str(REPO_ROOT / rec["path"])
             rows.append(rec)
     return rows
 
@@ -162,14 +188,14 @@ def make_label(
     sample_rate: int,
 ) -> dict:
     return {
-        "path": str(out_path),
+        "path": _to_rel(out_path),
         "label": label,
         "should_transcribe": should_transcribe,
         "synthetic": synthetic,
-        "source": source,
+        "source": _to_rel(source),
         "source_type": source_type,
         "base_utterance_id": base_utterance_id,
-        "corruption_source": corruption_source,
+        "corruption_source": _to_rel(corruption_source),
         "snr_db": snr_db,
         "rir_id": rir_id,
         "generation_seed": seed,

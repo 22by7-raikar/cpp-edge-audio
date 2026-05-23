@@ -126,7 +126,7 @@ def _extract_all(
     for k, entry in enumerate(records):
         if k % 100 == 0 and k > 0:
             print(f"  {k}/{len(records)}", file=sys.stderr, flush=True)
-        out = _extract_features(entry["path"], cfg)
+        out = _extract_features(gate_eval.resolve_path(entry["path"]), cfg)
         if out is None:
             print(f"  SKIP {os.path.basename(entry['path'])}", file=sys.stderr)
             continue

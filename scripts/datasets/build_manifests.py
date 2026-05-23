@@ -37,6 +37,14 @@ RAW_DIR   = REPO_ROOT / "data" / "raw"
 MAN_DIR   = REPO_ROOT / "data" / "manifests"
 
 
+def _to_rel(path: Path) -> str:
+    """Return path relative to REPO_ROOT for portable manifests."""
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
 # ---------------------------------------------------------------------------
 # Audio metadata
 # ---------------------------------------------------------------------------
@@ -104,7 +112,7 @@ def build_librispeech(split: str, validate: bool) -> tuple[list[dict], dict]:
 
             parts = utt_id.split("-")
             records.append({
-                "path":         str(flac),
+                "path":         _to_rel(flac),
                 "dataset":      "librispeech",
                 "split":        split,
                 "source_type":  "clean_speech",
@@ -150,7 +158,7 @@ def build_musan(subset: str, validate: bool) -> tuple[list[dict], dict]:
             stats["skipped"] += 1
             continue
         records.append({
-            "path":         str(wav),
+            "path":         _to_rel(wav),
             "dataset":      "musan",
             "split":        subset,
             "source_type":  MUSAN_LABELS.get(subset, "unknown"),
@@ -199,7 +207,7 @@ def build_rirs(validate: bool) -> tuple[list[dict], dict]:
             # room_id: parent dir name for simulated, filename stem for real
             room_id = wav.parent.name if rir_type == "simulated" else wav.stem
             records.append({
-                "path":         str(wav),
+                "path":         _to_rel(wav),
                 "dataset":      "rirs_noises",
                 "split":        "all",
                 "source_type":  "rir",
@@ -243,7 +251,7 @@ def build_demand(validate: bool) -> tuple[list[dict], dict]:
                 stats["skipped"] += 1
                 continue
             records.append({
-                "path":         str(wav),
+                "path":         _to_rel(wav),
                 "dataset":      "demand_16k",
                 "split":        "all",
                 "source_type":  "stationary_noise",
@@ -336,7 +344,7 @@ def main() -> None:
     all_stats: list[tuple[str, list[dict], dict]] = []
 
     if do_librispeech:
-        for split in ("dev-clean", "test-clean"):
+        for split in ("dev-clean", "test-clean", "train-clean-100"):
             key = split.replace("-", "_")
             print(f"Scanning LibriSpeech {split} ...")
             recs, stats = build_librispeech(split, args.validate)

@@ -35,6 +35,25 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import soundfile as sf
 
+# Repo root: tools/python/eval/ -> tools/python/ -> tools/ -> repo root
+_REPO_ROOT = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+)
+
+
+def resolve_path(path: str) -> str:
+    """Resolve a label/manifest path to absolute.
+
+    Repo-relative paths (no leading '/') are joined with the repo root.
+    Absolute paths pass through unchanged.
+    Supports JSONL files written both before (absolute) and after
+    (repo-relative) the portability change.
+    """
+    if os.path.isabs(path):
+        return path
+    return os.path.join(_REPO_ROOT, path)
+
+
 # ---------------------------------------------------------------------------
 # Default GateConfig — exact mirror of runtime/cpp/src/gate/gate.h defaults.
 # Change these only when gate.h defaults change.
@@ -616,7 +635,7 @@ def main() -> None:
     file_records: List[Dict] = []
 
     for i, entry in enumerate(labels):
-        path = entry["path"]
+        path = resolve_path(entry["path"])
         print(
             f"\r[{i+1:4d}/{len(labels)}] {os.path.basename(path)[:55]:55s}",
             end="",

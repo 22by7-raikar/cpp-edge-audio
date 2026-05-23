@@ -134,8 +134,8 @@ def build_clean_speech(pool: list, rng: random.Random, n: int, seed: int, dry_ru
             synthetic=False, source=rec["path"], source_type="clean_speech",
             base_utterance_id=rec.get("utterance_id", ""),
             corruption_source="", snr_db=None, rir_id="", seed=seed,
-            duration_sec=float(rec.get("duration_sec", CHUNK_SEC)),
-            sample_rate=int(rec.get("sample_rate", TARGET_SR)),
+            duration_sec=float(rec.get("duration_sec") or CHUNK_SEC),
+            sample_rate=int(rec.get("sample_rate") or TARGET_SR),
         ))
     return labels
 

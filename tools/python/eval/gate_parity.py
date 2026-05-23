@@ -244,7 +244,7 @@ def run_parity(
     worst: Dict[str, float] = {k: 0.0 for k in FIELD_MAP}
 
     for entry in files:
-        wav_path = entry["path"]
+        wav_path = gate_eval.resolve_path(entry["path"])
         name     = os.path.basename(wav_path)
         print(f"  {name:55s}", end="", file=sys.stderr, flush=True)
 
