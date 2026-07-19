@@ -13,10 +13,6 @@ runtime/cpp/build/
 # Dataset directories — tracked by structure (.gitkeep) and symlinks, not content
 data/raw/*
 !data/raw/.gitkeep
-!data/raw/librispeech
-!data/raw/musan
-!data/raw/rirs_noises
-!data/raw/demand_16k
 data/external/*
 !data/external/.gitkeep
 data/processed/*
@@ -31,6 +27,17 @@ data/labels/auto_*.tsv
 # Legacy ignore (pre-restructure)
 data/*.wav
 data/*.flac
+
+# All generated C++ build trees
+runtime/cpp/build_tests/
+
+# Local repository archives and diagnostics
+cpp-edge-audio-src.tar.gz
+missing_paths.txt
+
+# Local agent prompts and workspace settings
+prompts/
+*.code-workspace
 
 # Benchmark results (keep configs, gitignore raw output logs)
 benchmarks/results/
