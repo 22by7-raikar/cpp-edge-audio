@@ -63,3 +63,14 @@ Python is support tooling only (tools/python/).
 - no emotion recognition as a main feature
 - no fancy GUI
 - no unnecessary docs
+
+## Rate-limit aware workflow
+
+- Do not perform broad repo audits unless explicitly asked.
+- Do not run `find .`, `cat` large files, or inspect unrelated directories.
+- Prefer targeted file reads.
+- Work on one milestone per request.
+- Avoid repeating project context already present in instructions.
+- Keep summaries short and focused on changed files.
+- Do not generate large reports in chat; write them to files and summarize key numbers.
+- Before editing, inspect only the files listed in the task scope.

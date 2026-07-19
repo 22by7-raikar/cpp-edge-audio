@@ -20,17 +20,23 @@
 //   --log           / -l   <path>    Write TSV log to this file in addition to stdout
 //   --bench-json    / -j   <path>    Write JSON benchmark file (per-chunk + summary)
 //   --language             <str>     Language hint for Whisper (default: en)
+//   --gate-only                      Run gate + scene only; skip ASR (--model not required)
+//   --vad-only                       Run DSP VAD segmentation only; print JSON to stdout
+//   --vad-asr                        Use VAD segmentation instead of fixed-window chunking; gate + ASR still run
+//   --vad-asr-packed                 VAD segmentation with padding + merging to wider ASR windows (fewer CUDA calls)
 //
 // TODO(future): microphone capture path.
 
 #include <cstring>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "audio/audio_io.h"
 #include "asr/asr.h"
 #include "chunker/chunker.h"
+#include "chunker/vad.h"
 #include "gate/gate.h"
 #include "logging/logger.h"
 #include "scene/scene.h"
@@ -62,8 +68,12 @@ struct CliArgs {
     double      max_silence    = 0.90;
     double      max_clip       = 0.05;
     double      max_flatness   = 0.90;
-    bool        gate_enabled   = true;
-    bool        adaptive_enabled = true;
+    bool        gate_enabled     = true;
+    bool        adaptive_enabled  = true;
+    bool        gate_only         = false;  // skip ASR, model not required
+    bool        vad_only          = false;  // run VAD only, print JSON to stdout
+    bool        vad_asr           = false;  // VAD segmentation instead of fixed-window chunking
+    bool        vad_asr_packed     = false;  // VAD + padding/merge packing before ASR
 };
 
 bool parse_args(int argc, char** argv, CliArgs& out) {
@@ -92,14 +102,22 @@ bool parse_args(int argc, char** argv, CliArgs& out) {
         else if (a == "--max-flatness")             out.max_flatness = std::stod(next());
         else if (a == "--no-gate")                  out.gate_enabled = false;
         else if (a == "--no-adapt")                 out.adaptive_enabled = false;
+        else if (a == "--gate-only")                out.gate_only = true;
+        else if (a == "--vad-only")                 out.vad_only  = true;
+        else if (a == "--vad-asr")                  out.vad_asr        = true;
+        else if (a == "--vad-asr-packed")             out.vad_asr_packed = true;
         else {
             std::cerr << "Unknown argument: " << a << "\n";
             return false;
         }
     }
 
-    if (out.input_path.empty() || out.model_path.empty()) {
-        std::cerr << "ERROR: --input and --model are required.\n";
+    if (out.input_path.empty()) {
+        std::cerr << "ERROR: --input is required.\n";
+        return false;
+    }
+    if (!out.gate_only && !out.vad_only && !out.vad_asr && !out.vad_asr_packed && out.model_path.empty()) {
+        std::cerr << "ERROR: --model is required unless --gate-only or --vad-only is set.\n";
         return false;
     }
     return true;
@@ -155,12 +173,94 @@ int main(int argc, char** argv) {
     }
 
     // -----------------------------------------------------------
-    // Chunker
+    // --vad-only: run VAD, print JSON, exit
     // -----------------------------------------------------------
-    pipeline::ChunkerConfig chunk_cfg;
-    chunk_cfg.chunk_ms = args.chunk_ms;
-    chunk_cfg.hop_ms   = args.hop_ms;
-    const auto chunks = pipeline::chunk_audio(audio, chunk_cfg);
+    if (args.vad_only) {
+        pipeline::VadConfig vad_cfg;
+        const auto segs = pipeline::run_vad(
+            audio.samples.data(),
+            static_cast<int>(audio.samples.size()),
+            audio.sample_rate,
+            vad_cfg);
+
+        double speech_dur = 0.0;
+        for (const auto& s : segs) speech_dur += s.duration_sec();
+
+        const double total_dur = audio.duration_sec();
+        const double speech_frac = (total_dur > 0.0) ? speech_dur / total_dur : 0.0;
+
+        std::printf("{\n");
+        std::printf("  \"input\": \"%s\",\n", args.input_path.c_str());
+        std::printf("  \"sample_rate\": %d,\n", audio.sample_rate);
+        std::printf("  \"total_duration_sec\": %.4f,\n", total_dur);
+        std::printf("  \"n_segments\": %zu,\n", segs.size());
+        std::printf("  \"speech_duration_sec\": %.4f,\n", speech_dur);
+        std::printf("  \"speech_fraction\": %.4f,\n", speech_frac);
+        std::printf("  \"vad_segments\": [\n");
+        for (size_t i = 0; i < segs.size(); ++i) {
+            const auto& s = segs[i];
+            std::printf(
+                "    {\"start_sec\": %.4f, \"end_sec\": %.4f,"
+                " \"duration_sec\": %.4f, \"speech_ratio\": %.4f,"
+                " \"frame_count\": %d}%s\n",
+                s.start_sec, s.end_sec, s.duration_sec(),
+                s.speech_ratio, s.frame_count,
+                (i + 1 < segs.size()) ? "," : "");
+        }
+        std::printf("  ]\n}\n");
+        return 0;
+    }
+
+    // -----------------------------------------------------------
+    // Build chunk list: fixed-window or VAD-based
+    // -----------------------------------------------------------
+    std::vector<pipeline::Chunk> chunks;
+    if (args.vad_asr || args.vad_asr_packed) {
+        pipeline::VadConfig vad_cfg;
+        const auto raw_segs = pipeline::run_vad(
+            audio.samples.data(),
+            static_cast<int>(audio.samples.size()),
+            audio.sample_rate,
+            vad_cfg);
+
+        // Optionally pack raw segments into wider ASR windows.
+        const std::vector<pipeline::VadSegment>& segs =
+            args.vad_asr_packed
+            ? pipeline::pack_vad_segments(
+                  raw_segs,
+                  audio.duration_sec())
+            : raw_segs;
+
+        std::cerr << (args.vad_asr_packed ? "[vad-packed] " : "[vad-asr] ")
+                  << raw_segs.size() << " raw segments";
+        if (args.vad_asr_packed)
+            std::cerr << " -> " << segs.size() << " packed windows";
+        std::cerr << "\n";
+
+        chunks.reserve(segs.size());
+        for (size_t i = 0; i < segs.size(); ++i) {
+            const auto& seg = segs[i];
+            const int s_idx = std::max(0,
+                static_cast<int>(seg.start_sec * audio.sample_rate));
+            const int e_idx = std::min(
+                static_cast<int>(audio.samples.size()),
+                static_cast<int>(seg.end_sec   * audio.sample_rate));
+            pipeline::Chunk c;
+            c.sample_rate = audio.sample_rate;
+            c.index       = static_cast<int>(i);
+            c.start_sec   = seg.start_sec;
+            c.end_sec     = seg.end_sec;
+            if (s_idx < e_idx)
+                c.samples.assign(audio.samples.begin() + s_idx,
+                                 audio.samples.begin() + e_idx);
+            chunks.push_back(std::move(c));
+        }
+    } else {
+        pipeline::ChunkerConfig chunk_cfg;
+        chunk_cfg.chunk_ms = args.chunk_ms;
+        chunk_cfg.hop_ms   = args.hop_ms;
+        chunks = pipeline::chunk_audio(audio, chunk_cfg);
+    }
 
     // -----------------------------------------------------------
     // Gate config
@@ -184,15 +284,24 @@ int main(int argc, char** argv) {
     // -----------------------------------------------------------
     // ASR engine
     // -----------------------------------------------------------
-    pipeline::AsrConfig asr_cfg;
-    asr_cfg.model_path = args.model_path;
-    asr_cfg.n_threads  = args.n_threads;
-    asr_cfg.language   = args.language;
-
-    pipeline::AsrEngine asr(asr_cfg);
-    if (!asr.ready()) {
-        std::cerr << "ERROR loading model: " << asr.load_error() << "\n";
-        return 1;
+    // ASR engine — only initialised when not in gate-only mode.
+    std::unique_ptr<pipeline::AsrEngine> asr_ptr;
+    if (!args.gate_only) {
+        pipeline::AsrConfig asr_cfg;
+        asr_cfg.model_path = args.model_path;
+        asr_cfg.n_threads  = args.n_threads;
+        asr_cfg.language   = args.language;
+        asr_ptr = std::make_unique<pipeline::AsrEngine>(asr_cfg);
+        if (!asr_ptr->ready()) {
+            std::cerr << "ERROR loading model: " << asr_ptr->load_error() << "\n";
+            return 1;
+        }
+        std::cerr << "[asr] backend_requested=" << (asr_ptr->gpu_requested() ? "cuda" : "cpu")
+                  << " backend_active=" << asr_ptr->backend_mode()
+                  << " cpu_fallback=" << (asr_ptr->used_cpu_fallback() ? "yes" : "no")
+                  << "\n";
+    } else {
+        std::cerr << "[asr] gate-only mode, model not loaded\n";
     }
 
     // -----------------------------------------------------------
@@ -228,16 +337,17 @@ int main(int argc, char** argv) {
             case pipeline::GateDecision::BORDERLINE: ++n_borderline; break;
         }
 
-        // ASR: run on PASS and BORDERLINE unless adaptive controller suppresses it
+        // ASR: run on PASS and BORDERLINE unless gate-only or adaptive suppresses it
         pipeline::AsrResult asr_result;
         const bool run_asr =
+            !args.gate_only &&
             (!args.gate_enabled ||
              gate.decision == pipeline::GateDecision::PASS ||
              gate.decision == pipeline::GateDecision::BORDERLINE) &&
             !adaptive.skip_asr(scene.label);
 
-        if (run_asr) {
-            asr_result = asr.transcribe(
+        if (run_asr && asr_ptr) {
+            asr_result = asr_ptr->transcribe(
                 chunk.samples.data(),
                 static_cast<int>(chunk.samples.size()));
             total_infer_ms += asr_result.inference_ms;

@@ -24,6 +24,7 @@
 
 // Pull in module headers (relative to runtime/cpp/src via include path in CMakeLists)
 #include "chunker/chunker.h"
+#include "chunker/vad.h"
 #include "gate/features.h"
 #include "gate/gate.h"
 #include "scene/scene.h"
@@ -564,6 +565,87 @@ static bool test_logger_tsv_keys() {
 }
 
 // -----------------------------------------------------------------------
+// VAD tests
+// -----------------------------------------------------------------------
+
+// Build a signal: silence | sine | silence
+static std::vector<float> make_speech_in_silence(
+    float pre_sec, float speech_sec, float post_sec,
+    float freq_hz, float amplitude, int sr)
+{
+    const int pre  = static_cast<int>(pre_sec    * sr);
+    const int mid  = static_cast<int>(speech_sec * sr);
+    const int post = static_cast<int>(post_sec   * sr);
+    std::vector<float> v(pre + mid + post, 0.0f);
+    for (int i = 0; i < mid; ++i) {
+        v[pre + i] = amplitude * std::sin(
+            2.0f * static_cast<float>(M_PI) * freq_hz * i / sr);
+    }
+    return v;
+}
+
+// All silence → no segments
+static bool test_vad_all_silence() {
+    const auto sig = make_silence(16000 * 3);
+    const auto segs = pipeline::run_vad(
+        sig.data(), static_cast<int>(sig.size()), 16000);
+    CHECK(segs.empty());
+    return true;
+}
+
+// Speech burst surrounded by silence → exactly 1 segment with sane boundaries
+static bool test_vad_speech_in_silence() {
+    // 0.5s silence + 1.0s 200Hz sine at 0.2 amplitude + 0.5s silence = 2.0s total
+    const int SR = 16000;
+    const auto sig = make_speech_in_silence(0.5f, 1.0f, 0.5f, 200.0f, 0.2f, SR);
+    const auto segs = pipeline::run_vad(
+        sig.data(), static_cast<int>(sig.size()), SR);
+    CHECK(segs.size() == 1u);
+    // Segment should start inside the pre-silence window with some tolerance
+    CHECK(segs[0].start_sec < 0.6);
+    // Segment should cover most of the speech region
+    CHECK(segs[0].end_sec > 1.3);
+    // End must not exceed audio duration (2.0s) with a small rounding margin
+    CHECK(segs[0].end_sec <= 2.05);
+    return true;
+}
+
+// Short burst below min_speech_ms (200ms) → filtered out
+static bool test_vad_short_burst_filtered() {
+    // 0.5s silence + 0.08s (80ms) sine + 1.0s silence
+    // With hangover_frames=8 @ hop=10ms → segment ≈ 160ms < 200ms → discarded
+    const int SR = 16000;
+    const auto sig = make_speech_in_silence(0.5f, 0.08f, 1.0f, 200.0f, 0.2f, SR);
+    pipeline::VadConfig cfg;  // defaults: min_speech_ms=200
+    const auto segs = pipeline::run_vad(
+        sig.data(), static_cast<int>(sig.size()), SR, cfg);
+    CHECK(segs.empty());
+    return true;
+}
+
+// Continuous sine → 1 segment covering nearly all of the audio
+static bool test_vad_continuous_speech() {
+    const int SR = 16000;
+    const auto sig = make_sine(SR * 3, 200.0f, 0.2f, SR);
+    const auto segs = pipeline::run_vad(
+        sig.data(), static_cast<int>(sig.size()), SR);
+    CHECK(segs.size() == 1u);
+    CHECK(segs[0].start_sec < 0.1);
+    CHECK(segs[0].duration_sec() > 2.5);
+    return true;
+}
+
+// White noise → rejected by ZCR filter (ZCR ≈ 8000/s >> zcr_max 3000/s) → no segments
+static bool test_vad_noise_rejected() {
+    const int SR = 16000;
+    const auto sig = make_white_noise(SR * 3, 0.3f);
+    const auto segs = pipeline::run_vad(
+        sig.data(), static_cast<int>(sig.size()), SR);
+    CHECK(segs.empty());
+    return true;
+}
+
+// -----------------------------------------------------------------------
 // Main
 // -----------------------------------------------------------------------
 
@@ -603,6 +685,13 @@ int main() {
 
     // Logger schema
     run("logger_tsv_keys",        test_logger_tsv_keys);
+
+    // VAD
+    run("vad_all_silence",        test_vad_all_silence);
+    run("vad_speech_in_silence",  test_vad_speech_in_silence);
+    run("vad_short_burst_filtered", test_vad_short_burst_filtered);
+    run("vad_continuous_speech",  test_vad_continuous_speech);
+    run("vad_noise_rejected",     test_vad_noise_rejected);
 
     std::cout << "\n" << g_passed << " passed, " << g_failed << " failed\n";
     return g_failed > 0 ? 1 : 0;

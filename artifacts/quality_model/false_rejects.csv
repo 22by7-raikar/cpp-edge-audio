@@ -1,0 +1,12 @@
+path,label,should_transcribe,proba
+/home/apr/Personal/cpp-edge-audio/data/processed/eval_subset/clean_speech/clean_speech_0009.flac,clean_speech,yes,0.2443
+/home/apr/Personal/cpp-edge-audio/data/processed/eval_subset/clean_speech/clean_speech_0019.flac,clean_speech,yes,0.2812
+/home/apr/Personal/cpp-edge-audio/data/processed/eval_subset/clean_speech/clean_speech_0041.flac,clean_speech,yes,0.0766
+/home/apr/Personal/cpp-edge-audio/data/processed/eval_subset/clean_speech/clean_speech_0055.flac,clean_speech,yes,0.0726
+/home/apr/Personal/cpp-edge-audio/data/processed/eval_subset/clean_speech/clean_speech_0067.flac,clean_speech,yes,0.1467
+/home/apr/Personal/cpp-edge-audio/data/processed/eval_subset/speech_in_noise/speech_in_noise_0015.wav,speech_in_noise,yes,0.2902
+/home/apr/Personal/cpp-edge-audio/data/processed/eval_subset/speech_in_noise/speech_in_noise_0023.wav,speech_in_noise,yes,0.1668
+/home/apr/Personal/cpp-edge-audio/data/processed/eval_subset/speech_in_noise/speech_in_noise_0033.wav,speech_in_noise,yes,0.2549
+/home/apr/Personal/cpp-edge-audio/data/processed/eval_subset/speech_in_noise/speech_in_noise_0052.wav,speech_in_noise,yes,0.1503
+/home/apr/Personal/cpp-edge-audio/data/processed/eval_subset/speech_in_noise/speech_in_noise_0071.wav,speech_in_noise,yes,0.1195
+/home/apr/Personal/cpp-edge-audio/data/processed/eval_subset/speech_in_noise/speech_in_noise_0079.wav,speech_in_noise,yes,0.1795
