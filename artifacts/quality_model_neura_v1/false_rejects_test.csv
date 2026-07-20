@@ -1,0 +1,15 @@
+stable_example_id,path,label,should_transcribe,target,probability,threshold,binary_prediction,correct
+d010d958a5e37633d196f276,data/processed/quality_test/clean_speech/clean_speech_0106.flac,clean_speech,yes,1,0.059606079722794685,0.29999999999999999,0,False
+58d57ede3985f5f655756a47,data/processed/quality_test/clean_speech/clean_speech_0305.flac,clean_speech,yes,1,0.16428077761422075,0.29999999999999999,0,False
+4b77b43d99ab07a9be5e9807,data/processed/quality_test/speech_in_noise/speech_in_noise_0009.wav,speech_in_noise,yes,1,0.26310310137249293,0.29999999999999999,0,False
+7d3cdbf77312d7c3a4998c81,data/processed/quality_test/speech_in_noise/speech_in_noise_0097.wav,speech_in_noise,yes,1,0.27806818751785806,0.29999999999999999,0,False
+182b6f269c0e779dbd0ba44d,data/processed/quality_test/speech_in_noise/speech_in_noise_0162.wav,speech_in_noise,yes,1,0.19710480359451765,0.29999999999999999,0,False
+3d895c252ceb5fdd0e2d07dc,data/processed/quality_test/speech_in_noise/speech_in_noise_0247.wav,speech_in_noise,yes,1,0.27853863359373066,0.29999999999999999,0,False
+5dcff19707202c8be4b9b41d,data/processed/quality_test/speech_in_noise/speech_in_noise_0286.wav,speech_in_noise,yes,1,0.12420209956352853,0.29999999999999999,0,False
+936ea59da37dd694918c01ae,data/processed/quality_test/speech_in_noise/speech_in_noise_0384.wav,speech_in_noise,yes,1,0.19916464589767,0.29999999999999999,0,False
+08a6da7b741b1eeb8eb1bd33,data/processed/quality_test/speech_in_reverb/speech_in_reverb_0008.wav,speech_in_reverb,yes,1,0.22347102124655455,0.29999999999999999,0,False
+b83d4d1cdf6e0d77d7e36974,data/processed/quality_test/speech_in_reverb/speech_in_reverb_0037.wav,speech_in_reverb,yes,1,0.25499941369306162,0.29999999999999999,0,False
+5f2ec59e2c0bce15cb39a79c,data/processed/quality_test/speech_in_reverb/speech_in_reverb_0055.wav,speech_in_reverb,yes,1,0.21853985490948016,0.29999999999999999,0,False
+df0983c629a08ea6811bff72,data/processed/quality_test/speech_in_reverb/speech_in_reverb_0160.wav,speech_in_reverb,yes,1,0.20931031574264827,0.29999999999999999,0,False
+6c99c40200540bcd40ec3639,data/processed/quality_test/speech_in_reverb/speech_in_reverb_0163.wav,speech_in_reverb,yes,1,0.25682337836859515,0.29999999999999999,0,False
+c20be15c9c6c122df6731beb,data/processed/quality_test/speech_in_reverb/speech_in_reverb_0191.wav,speech_in_reverb,yes,1,0.2884825663386858,0.29999999999999999,0,False

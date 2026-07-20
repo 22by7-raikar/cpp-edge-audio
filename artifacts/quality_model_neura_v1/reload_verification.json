@@ -1,0 +1,11 @@
+{
+  "exact_binary_decision_agreement": true,
+  "feature_table_path": "test_features.npz",
+  "maximum_probability_difference": 0.0,
+  "mean_probability_difference": 0.0,
+  "model_path": "quality_gbt.joblib",
+  "prediction_path": "test_predictions.csv",
+  "rows": 1700,
+  "schema_version": "quality-artifact-reload-v1",
+  "selected_threshold": 0.3
+}

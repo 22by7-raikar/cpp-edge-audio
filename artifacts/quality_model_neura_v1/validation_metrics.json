@@ -1,0 +1,121 @@
+{
+  "default_threshold_0_5_diagnostic": {
+    "metrics": {
+      "clean_speech_fr": 23,
+      "f1": 0.9091,
+      "far": 0.1657,
+      "fn": 70,
+      "fp": 116,
+      "frr": 0.07,
+      "music_fa": 55,
+      "per_label": {
+        "clean_speech": {
+          "fn": 23,
+          "fp": 0,
+          "tn": 0,
+          "tp": 377
+        },
+        "clipped_or_distorted": {
+          "fn": 0,
+          "fp": 18,
+          "tn": 182,
+          "tp": 0
+        },
+        "low_utility": {
+          "fn": 0,
+          "fp": 0,
+          "tn": 150,
+          "tp": 0
+        },
+        "music": {
+          "fn": 0,
+          "fp": 55,
+          "tn": 145,
+          "tp": 0
+        },
+        "speech_in_noise": {
+          "fn": 22,
+          "fp": 0,
+          "tn": 0,
+          "tp": 378
+        },
+        "speech_in_reverb": {
+          "fn": 25,
+          "fp": 0,
+          "tn": 0,
+          "tp": 175
+        },
+        "stationary_noise": {
+          "fn": 0,
+          "fp": 43,
+          "tn": 107,
+          "tp": 0
+        }
+      },
+      "precision": 0.8891,
+      "recall": 0.93,
+      "tn": 584,
+      "tp": 930
+    },
+    "threshold": 0.5
+  },
+  "metrics_at_selected_threshold": {
+    "clean_speech_fr": 9,
+    "f1": 0.9184,
+    "far": 0.2186,
+    "fn": 21,
+    "fp": 153,
+    "frr": 0.021,
+    "music_fa": 74,
+    "per_label": {
+      "clean_speech": {
+        "fn": 9,
+        "fp": 0,
+        "tn": 0,
+        "tp": 391
+      },
+      "clipped_or_distorted": {
+        "fn": 0,
+        "fp": 18,
+        "tn": 182,
+        "tp": 0
+      },
+      "low_utility": {
+        "fn": 0,
+        "fp": 0,
+        "tn": 150,
+        "tp": 0
+      },
+      "music": {
+        "fn": 0,
+        "fp": 74,
+        "tn": 126,
+        "tp": 0
+      },
+      "speech_in_noise": {
+        "fn": 7,
+        "fp": 0,
+        "tn": 0,
+        "tp": 393
+      },
+      "speech_in_reverb": {
+        "fn": 5,
+        "fp": 0,
+        "tn": 0,
+        "tp": 195
+      },
+      "stationary_noise": {
+        "fn": 0,
+        "fp": 61,
+        "tn": 89,
+        "tp": 0
+      }
+    },
+    "precision": 0.8648,
+    "recall": 0.979,
+    "tn": 547,
+    "tp": 979
+  },
+  "selected_threshold": 0.3,
+  "split": "validation"
+}

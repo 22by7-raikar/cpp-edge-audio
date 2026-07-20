@@ -32,6 +32,8 @@ from pathlib import Path
 
 import soundfile as sf
 
+from dataset_identity import portable_repo_path
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RAW_DIR   = REPO_ROOT / "data" / "raw"
 MAN_DIR   = REPO_ROOT / "data" / "manifests"
@@ -39,10 +41,7 @@ MAN_DIR   = REPO_ROOT / "data" / "manifests"
 
 def _to_rel(path: Path) -> str:
     """Return path relative to REPO_ROOT for portable manifests."""
-    try:
-        return str(path.relative_to(REPO_ROOT))
-    except ValueError:
-        return str(path)
+    return portable_repo_path(path, REPO_ROOT)
 
 
 # ---------------------------------------------------------------------------

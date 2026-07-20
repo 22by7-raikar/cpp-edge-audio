@@ -1,0 +1,130 @@
+{
+  "forbidden_overlap_total": 0,
+  "include_content_hashes": true,
+  "pairs": {
+    "train__test": {
+      "base_utterance_id": {
+        "count": 0,
+        "examples": []
+      },
+      "canonical_source_identity": {
+        "count": 0,
+        "examples": []
+      },
+      "content_hash": {
+        "count": 0,
+        "examples": []
+      },
+      "derived_fingerprint": {
+        "count": 0,
+        "examples": []
+      },
+      "output_path": {
+        "count": 0,
+        "examples": []
+      }
+    },
+    "train__validation": {
+      "base_utterance_id": {
+        "count": 0,
+        "examples": []
+      },
+      "canonical_source_identity": {
+        "count": 0,
+        "examples": []
+      },
+      "content_hash": {
+        "count": 0,
+        "examples": []
+      },
+      "derived_fingerprint": {
+        "count": 0,
+        "examples": []
+      },
+      "output_path": {
+        "count": 0,
+        "examples": []
+      }
+    },
+    "validation__test": {
+      "base_utterance_id": {
+        "count": 0,
+        "examples": []
+      },
+      "canonical_source_identity": {
+        "count": 0,
+        "examples": []
+      },
+      "content_hash": {
+        "count": 0,
+        "examples": []
+      },
+      "derived_fingerprint": {
+        "count": 0,
+        "examples": []
+      },
+      "output_path": {
+        "count": 0,
+        "examples": []
+      }
+    }
+  },
+  "passed": true,
+  "schema_version": "quality-split-overlap-v1",
+  "splits": {
+    "test": {
+      "class_counts": {
+        "no": 700,
+        "yes": 1000
+      },
+      "label_counts": {
+        "clean_speech": 400,
+        "clipped_or_distorted": 200,
+        "low_utility": 150,
+        "music": 200,
+        "speech_in_noise": 400,
+        "speech_in_reverb": 200,
+        "stationary_noise": 150
+      },
+      "rows": 1700,
+      "unique_base_utterance_ids": 1114,
+      "unique_output_paths": 1700
+    },
+    "train": {
+      "class_counts": {
+        "no": 700,
+        "yes": 1000
+      },
+      "label_counts": {
+        "clean_speech": 400,
+        "clipped_or_distorted": 200,
+        "low_utility": 150,
+        "music": 200,
+        "speech_in_noise": 400,
+        "speech_in_reverb": 200,
+        "stationary_noise": 150
+      },
+      "rows": 1700,
+      "unique_base_utterance_ids": 1324,
+      "unique_output_paths": 1700
+    },
+    "validation": {
+      "class_counts": {
+        "no": 700,
+        "yes": 1000
+      },
+      "label_counts": {
+        "clean_speech": 400,
+        "clipped_or_distorted": 200,
+        "low_utility": 150,
+        "music": 200,
+        "speech_in_noise": 400,
+        "speech_in_reverb": 200,
+        "stationary_noise": 150
+      },
+      "rows": 1700,
+      "unique_base_utterance_ids": 1084,
+      "unique_output_paths": 1700
+    }
+  }
+}

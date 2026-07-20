@@ -1,0 +1,63 @@
+{
+  "schema_version": "quality-split-summary-v1",
+  "test": {
+    "class_counts": {
+      "no": 700,
+      "yes": 1000
+    },
+    "label_counts": {
+      "clean_speech": 400,
+      "clipped_or_distorted": 200,
+      "low_utility": 150,
+      "music": 200,
+      "speech_in_noise": 400,
+      "speech_in_reverb": 200,
+      "stationary_noise": 150
+    },
+    "label_path": "data/labels/quality_test.jsonl",
+    "label_sha256": "4494ea9ffcbe3183cf3bc2ebc88238ab0e8a4be9f431e607b37d50c1fa7d143b",
+    "rows": 1700,
+    "unique_base_utterance_ids": 1114,
+    "unique_output_paths": 1700
+  },
+  "train": {
+    "class_counts": {
+      "no": 700,
+      "yes": 1000
+    },
+    "label_counts": {
+      "clean_speech": 400,
+      "clipped_or_distorted": 200,
+      "low_utility": 150,
+      "music": 200,
+      "speech_in_noise": 400,
+      "speech_in_reverb": 200,
+      "stationary_noise": 150
+    },
+    "label_path": "data/labels/quality_train.jsonl",
+    "label_sha256": "44dd52a8a0ed039c9dee7efb0b46a435ea0516a79c63dec0419725f4638a1b20",
+    "rows": 1700,
+    "unique_base_utterance_ids": 1324,
+    "unique_output_paths": 1700
+  },
+  "validation": {
+    "class_counts": {
+      "no": 700,
+      "yes": 1000
+    },
+    "label_counts": {
+      "clean_speech": 400,
+      "clipped_or_distorted": 200,
+      "low_utility": 150,
+      "music": 200,
+      "speech_in_noise": 400,
+      "speech_in_reverb": 200,
+      "stationary_noise": 150
+    },
+    "label_path": "data/labels/quality_val.jsonl",
+    "label_sha256": "044b662aaaab549faff6e968cead264bf089127f593e543d607b590260dea107",
+    "rows": 1700,
+    "unique_base_utterance_ids": 1084,
+    "unique_output_paths": 1700
+  }
+}

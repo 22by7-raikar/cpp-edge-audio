@@ -53,3 +53,4 @@ tools/python/edge_stt/
 .DS_Store
 .vscode/settings.json
 *.swp
+*.save
