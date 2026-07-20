@@ -28,18 +28,38 @@ Usage:
 """
 
 import argparse
+import csv
 import datetime
 import json
 import os
+import platform
+import shlex
 import subprocess
 import sys
-from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+import sklearn
+import soundfile as sf
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "eval"))
 import gate_eval  # noqa: E402
+
+REPO_ROOT = Path(_HERE).resolve().parents[2]
+DATASET_TOOLS = REPO_ROOT / "scripts" / "datasets"
+sys.path.insert(0, str(DATASET_TOOLS))
+from dataset_identity import (  # noqa: E402
+    assert_no_forbidden_overlap,
+    build_overlap_report,
+    load_jsonl,
+    portable_repo_path,
+    print_overlap_matrix,
+    sha256_file,
+    split_summary,
+    stable_example_id,
+)
 
 try:
     from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
@@ -79,6 +99,26 @@ N_DSP_FEATURES = 24
 
 # Probability thresholds to sweep.
 THRESHOLD_STEPS: List[float] = [round(t * 0.1, 1) for t in range(1, 10)]
+FEATURE_SCHEMA_VERSION = "quality-file-features-v1"
+AUTHORITATIVE_ARTIFACT_FILES = [
+    "quality_gbt.joblib",
+    "feature_schema.json",
+    "operating_point.json",
+    "validation_metrics.json",
+    "test_metrics.json",
+    "threshold_sweep.tsv",
+    "feature_importance.json",
+    "validation_predictions.csv",
+    "test_predictions.csv",
+    "false_accepts_test.csv",
+    "false_rejects_test.csv",
+    "model_metadata.json",
+    "split_summary.json",
+    "overlap_report.json",
+    "validation_features.npz",
+    "test_features.npz",
+    "reload_verification.json",
+]
 
 
 def _extract_features(path: str, cfg: Dict) -> Optional[Tuple[np.ndarray, str]]:
@@ -468,19 +508,15 @@ def _save_artifact(
         )
     print(f"Saved: {op_path}", file=sys.stderr)
 
-    # metrics.json
+    # metrics.json. Keep the legacy top-level "metrics" field, but compute it
+    # using the selected threshold and label the optional 0.5 diagnostics
+    # separately so the stored threshold can never describe different counts.
     metrics_path = os.path.join(artifact_dir, 'metrics.json')
+    metrics_payload = _legacy_metrics_payload(
+        ts, threshold, y_te, y_proba, te_ents,
+    )
     with open(metrics_path, 'w') as fh:
-        json.dump(
-            {
-                'ts':        ts,
-                'model':     'gbt',
-                'threshold': threshold,
-                'metrics':   gbt_result['metrics'],
-            },
-            fh,
-            indent=2,
-        )
+        json.dump(metrics_payload, fh, indent=2)
     print(f"Saved: {metrics_path}", file=sys.stderr)
 
     # false_accepts.csv and false_rejects.csv
@@ -522,7 +558,518 @@ def _save_artifact(
         print(f"Saved: {fi_path}", file=sys.stderr)
 
 
+def _write_json(path: Path, payload: Dict) -> None:
+    with open(path, "w") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+
+
+def _metrics_document(
+    split_name: str,
+    threshold: float,
+    y_true: np.ndarray,
+    probabilities: np.ndarray,
+    entries: List[Dict],
+) -> Dict:
+    selected_predictions = (probabilities >= threshold).astype(int)
+    default_predictions = (probabilities >= 0.5).astype(int)
+    return {
+        "split": split_name,
+        "selected_threshold": float(threshold),
+        "metrics_at_selected_threshold": _eval_metrics(
+            y_true, selected_predictions, entries,
+        ),
+        "default_threshold_0_5_diagnostic": {
+            "threshold": 0.5,
+            "metrics": _eval_metrics(y_true, default_predictions, entries),
+        },
+    }
+
+
+def _assert_metrics_document_consistent(
+    document: Dict,
+    threshold: float,
+    y_true: np.ndarray,
+    probabilities: np.ndarray,
+    entries: List[Dict],
+) -> None:
+    if float(document["selected_threshold"]) != float(threshold):
+        raise RuntimeError("metrics document threshold does not match selected threshold")
+    expected = _eval_metrics(
+        y_true, (probabilities >= threshold).astype(int), entries,
+    )
+    if document["metrics_at_selected_threshold"] != expected:
+        raise RuntimeError("metrics document was not computed at its selected threshold")
+    diagnostic = document.get("default_threshold_0_5_diagnostic", {})
+    if float(diagnostic.get("threshold", -1.0)) != 0.5:
+        raise RuntimeError("default-threshold diagnostic is mislabeled")
+
+
+def _legacy_metrics_payload(
+    timestamp: str,
+    threshold: float,
+    y_true: np.ndarray,
+    probabilities: np.ndarray,
+    entries: List[Dict],
+) -> Dict:
+    document = _metrics_document(
+        "evaluation", threshold, y_true, probabilities, entries,
+    )
+    _assert_metrics_document_consistent(
+        document, threshold, y_true, probabilities, entries,
+    )
+    return {
+        "ts": timestamp,
+        "model": "gbt",
+        "threshold": float(threshold),
+        "metrics": document["metrics_at_selected_threshold"],
+        "default_threshold_0_5_diagnostic": (
+            document["default_threshold_0_5_diagnostic"]
+        ),
+    }
+
+
+def _artifact_hashes(
+    artifact_dir: Path,
+    excluded_names: set[str] | None = None,
+) -> Dict[str, str]:
+    excluded = excluded_names or set()
+    return {
+        path.name: sha256_file(path)
+        for path in sorted(artifact_dir.iterdir(), key=lambda value: value.name)
+        if path.is_file() and path.name not in excluded
+    }
+
+
+def _git_state() -> Dict:
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT,
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        dirty = bool(subprocess.check_output(
+            ["git", "status", "--porcelain"], cwd=REPO_ROOT,
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip())
+        return {"commit": commit, "dirty": dirty}
+    except (OSError, subprocess.CalledProcessError):
+        return {"commit": "unknown", "dirty": None}
+
+
+def _extract_required(
+    split_name: str,
+    records: List[Dict],
+    cfg: Dict,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[Dict]]:
+    print(f"Extracting {split_name} features ({len(records)} files)...", file=sys.stderr)
+    extracted = _extract_all(records, cfg)
+    if len(extracted[0]) != len(records):
+        raise RuntimeError(
+            f"{split_name} feature extraction incomplete: "
+            f"{len(extracted[0])}/{len(records)}"
+        )
+    if extracted[0].shape[1] != len(FEATURE_NAMES):
+        raise RuntimeError(
+            f"{split_name} feature width is {extracted[0].shape[1]}, expected 27"
+        )
+    return extracted
+
+
+def _prediction_rows(
+    entries: List[Dict],
+    y_true: np.ndarray,
+    probabilities: np.ndarray,
+    threshold: float,
+) -> List[Dict]:
+    predictions = (probabilities >= threshold).astype(int)
+    rows = []
+    for index, entry in enumerate(entries):
+        rows.append({
+            "stable_example_id": stable_example_id(entry, REPO_ROOT),
+            "path": portable_repo_path(entry["path"], REPO_ROOT),
+            "label": entry["label"],
+            "should_transcribe": entry["should_transcribe"],
+            "target": int(y_true[index]),
+            "probability": format(float(probabilities[index]), ".17g"),
+            "threshold": format(float(threshold), ".17g"),
+            "binary_prediction": int(predictions[index]),
+            "correct": bool(predictions[index] == y_true[index]),
+        })
+    return rows
+
+
+def _write_prediction_csv(path: Path, rows: List[Dict]) -> None:
+    fieldnames = [
+        "stable_example_id", "path", "label", "should_transcribe", "target",
+        "probability", "threshold", "binary_prediction", "correct",
+    ]
+    with open(path, "w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _write_feature_table(
+    path: Path,
+    X: np.ndarray,
+    y: np.ndarray,
+    gate_predictions: np.ndarray,
+    entries: List[Dict],
+) -> None:
+    np.savez_compressed(
+        path,
+        X=np.asarray(X, dtype=np.float32),
+        y=np.asarray(y, dtype=np.int8),
+        gate_predictions=np.asarray(gate_predictions, dtype=np.int8),
+        stable_example_ids=np.asarray(
+            [stable_example_id(entry, REPO_ROOT) for entry in entries],
+        ),
+        feature_names=np.asarray(FEATURE_NAMES),
+    )
+
+
+def _verify_authoritative_artifact(artifact_dir: Path, output_path: Path) -> None:
+    clf, scaler, schema = _load_artifact(str(artifact_dir))
+    with np.load(artifact_dir / "test_features.npz") as table:
+        X = table["X"]
+        expected_ids = table["stable_example_ids"].astype(str).tolist()
+    with open(artifact_dir / "test_predictions.csv", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+
+    if [row["stable_example_id"] for row in rows] != expected_ids:
+        raise RuntimeError("test feature and prediction example IDs do not match")
+
+    X_eval = scaler.transform(X) if scaler is not None else X
+    reloaded_probabilities = clf.predict_proba(X_eval)[:, 1]
+    saved_probabilities = np.asarray(
+        [float(row["probability"]) for row in rows], dtype=np.float64,
+    )
+    threshold = float(schema["threshold"])
+    saved_decisions = np.asarray(
+        [int(row["binary_prediction"]) for row in rows], dtype=np.int8,
+    )
+    reloaded_decisions = (reloaded_probabilities >= threshold).astype(np.int8)
+    if not np.array_equal(saved_decisions, reloaded_decisions):
+        raise RuntimeError("reloaded artifact changed one or more test decisions")
+
+    differences = np.abs(reloaded_probabilities - saved_probabilities)
+    result = {
+        "schema_version": "quality-artifact-reload-v1",
+        "rows": len(rows),
+        "selected_threshold": threshold,
+        "exact_binary_decision_agreement": True,
+        "maximum_probability_difference": float(np.max(differences, initial=0.0)),
+        "mean_probability_difference": float(np.mean(differences)) if len(differences) else 0.0,
+        "model_path": "quality_gbt.joblib",
+        "feature_table_path": "test_features.npz",
+        "prediction_path": "test_predictions.csv",
+    }
+    _write_json(output_path, result)
+    print(json.dumps(result, sort_keys=True))
+
+
+def _resolve_repo_path(value: str) -> Path:
+    path = Path(value)
+    return path if path.is_absolute() else REPO_ROOT / path
+
+
+def _portable_command_argv(command_argv: Sequence[str]) -> List[str]:
+    """Normalize a complete Python invocation without changing its arguments."""
+    if not command_argv:
+        raise ValueError("command_argv must include the Python executable")
+
+    portable = ["python"]
+    for value in command_argv[1:]:
+        text = str(value)
+        path = Path(text)
+        if path.is_absolute():
+            try:
+                text = portable_repo_path(path, REPO_ROOT)
+            except ValueError:
+                # Non-repository arguments cannot be made portable without
+                # changing their meaning, so preserve them exactly.
+                pass
+        portable.append(text)
+    return portable
+
+
+def _build_model_metadata(
+    clf,
+    selected_threshold: float,
+    label_paths: Dict[str, Path],
+    label_hashes: Dict[str, str],
+    split_records: Dict[str, List[Dict]],
+    git_state: Dict,
+    artifact_dir: Path,
+    command_argv: Sequence[str],
+) -> Dict:
+    portable_argv = _portable_command_argv(command_argv)
+    return {
+        "schema_version": "quality-model-metadata-v1",
+        "utc_run_timestamp": datetime.datetime.now(
+            datetime.timezone.utc,
+        ).isoformat(),
+        "git": git_state,
+        "exact_command_line": shlex.join(portable_argv),
+        "argv": portable_argv,
+        "python": {
+            "version": platform.python_version(),
+            "full_version": sys.version,
+        },
+        "package_versions": {
+            "numpy": np.__version__,
+            "scikit-learn": sklearn.__version__,
+            "joblib": joblib.__version__,
+            "SoundFile": sf.__version__,
+        },
+        "model_type": type(clf).__name__,
+        "model_hyperparameters": clf.get_params(),
+        "seed": 42,
+        "selected_threshold": selected_threshold,
+        "threshold_selected_on": "validation",
+        "ordered_feature_schema_version": FEATURE_SCHEMA_VERSION,
+        "ordered_feature_names": FEATURE_NAMES,
+        "label_files": {
+            name: {
+                "path": portable_repo_path(path, REPO_ROOT),
+                "sha256": label_hashes[name],
+                "summary": split_summary(split_records[name]),
+            }
+            for name, path in label_paths.items()
+        },
+        "dataset_sources": [
+            "LibriSpeech train-clean-100",
+            "LibriSpeech dev-clean",
+            "LibriSpeech test-clean",
+            "MUSAN music and noise",
+            "DEMAND 16 kHz noise",
+            "RIRS_NOISES simulated RIRs",
+        ],
+        "code_paths": {
+            "feature_generation": "tools/python/eval/gate_eval.py",
+            "training": "tools/python/training/train_quality_model.py",
+            "dataset_identity": "scripts/datasets/dataset_identity.py",
+            "split_generation": "scripts/datasets/build_quality_train.py",
+        },
+        "artifact_hash_scope_excludes": ["model_metadata.json"],
+        "artifact_file_hashes": _artifact_hashes(
+            artifact_dir, {"model_metadata.json"},
+        ),
+    }
+
+
+def _run_authoritative_protocol(args, command_argv: Sequence[str]) -> None:
+    if args.seed != 42:
+        raise RuntimeError("authoritative GBT protocol requires --seed 42")
+
+    required = {
+        "--train-labels": args.train_labels,
+        "--val-labels": args.val_labels,
+        "--test-labels": args.test_labels,
+        "--save-artifact": args.save_artifact,
+    }
+    missing = [flag for flag, value in required.items() if not value]
+    if missing:
+        raise RuntimeError(
+            "authoritative protocol requires " + ", ".join(missing)
+        )
+
+    label_paths = {
+        "train": _resolve_repo_path(args.train_labels),
+        "validation": _resolve_repo_path(args.val_labels),
+        "test": _resolve_repo_path(args.test_labels),
+    }
+    artifact_dir = _resolve_repo_path(args.save_artifact)
+
+    print("Planned authoritative artifact outputs:")
+    for filename in AUTHORITATIVE_ARTIFACT_FILES:
+        print(f"  {artifact_dir / filename}")
+    print()
+
+    if artifact_dir.exists():
+        raise RuntimeError(f"artifact directory must not already exist: {artifact_dir}")
+    for name, path in label_paths.items():
+        if not path.is_file():
+            raise RuntimeError(f"{name} labels missing: {path}")
+        if "/home/apr" in path.read_text():
+            raise RuntimeError(f"machine-specific path found in {name} labels")
+
+    split_records = {name: load_jsonl(path) for name, path in label_paths.items()}
+    overlap_report = build_overlap_report(
+        split_records, REPO_ROOT, include_content_hashes=True,
+    )
+    print("Authoritative label overlap matrix:")
+    print_overlap_matrix(overlap_report)
+    assert_no_forbidden_overlap(overlap_report)
+
+    label_hashes = {
+        name: sha256_file(path) for name, path in label_paths.items()
+    }
+    git_state = _git_state()
+    cfg = dict(gate_eval.DEFAULT_CONFIG)
+
+    X_train, y_train, _, _train_entries = _extract_required(
+        "train", split_records["train"], cfg,
+    )
+    X_validation, y_validation, gate_validation, validation_entries = (
+        _extract_required("validation", split_records["validation"], cfg)
+    )
+
+    clf = GradientBoostingClassifier(
+        n_estimators=100,
+        max_depth=3,
+        learning_rate=0.1,
+        random_state=42,
+    )
+    print("Training authoritative GradientBoostingClassifier ...", file=sys.stderr)
+    clf.fit(X_train, y_train)
+
+    validation_probabilities = clf.predict_proba(X_validation)[:, 1]
+    validation_sweep = _sweep_thresholds(
+        "gbt", y_validation, validation_probabilities, validation_entries,
+    )
+    selected_row = max(validation_sweep, key=lambda row: row["f1"])
+    selected_threshold = float(selected_row["threshold"])
+    validation_metrics = _metrics_document(
+        "validation", selected_threshold, y_validation,
+        validation_probabilities, validation_entries,
+    )
+    _assert_metrics_document_consistent(
+        validation_metrics, selected_threshold, y_validation,
+        validation_probabilities, validation_entries,
+    )
+
+    # The held-out test is opened and evaluated only after the validation
+    # threshold has been selected and frozen.
+    X_test, y_test, gate_test, test_entries = _extract_required(
+        "test", split_records["test"], cfg,
+    )
+    test_probabilities = clf.predict_proba(X_test)[:, 1]
+    test_metrics = _metrics_document(
+        "test", selected_threshold, y_test, test_probabilities, test_entries,
+    )
+    _assert_metrics_document_consistent(
+        test_metrics, selected_threshold, y_test, test_probabilities, test_entries,
+    )
+
+    artifact_dir.mkdir(parents=True)
+    joblib.dump({"clf": clf, "scaler": None}, artifact_dir / "quality_gbt.joblib")
+
+    schema = {
+        "schema_version": FEATURE_SCHEMA_VERSION,
+        "model_type": type(clf).__name__,
+        "feature_names": FEATURE_NAMES,
+        "n_features": len(FEATURE_NAMES),
+        "metric_keys": METRIC_KEYS,
+        "chunk_sec": CHUNK_SEC,
+        "chunking": "non-overlapping 5-second chunks",
+        "example_granularity": "one complete audio file",
+        "aggregation": "per-file mean and max over chunks plus gate decision fractions",
+        "label_target": "should_transcribe == yes",
+        "threshold": selected_threshold,
+    }
+    _write_json(artifact_dir / "feature_schema.json", schema)
+    _write_json(artifact_dir / "operating_point.json", {
+        "model": "gbt",
+        "selected_on": "validation",
+        "selection_rule": "maximum validation F1 over fixed thresholds 0.1 through 0.9",
+        "tie_break": "lowest threshold in sweep order",
+        "threshold": selected_threshold,
+        "validation_metrics": validation_metrics["metrics_at_selected_threshold"],
+    })
+    _write_json(artifact_dir / "validation_metrics.json", validation_metrics)
+    _write_json(artifact_dir / "test_metrics.json", test_metrics)
+
+    with open(artifact_dir / "threshold_sweep.tsv", "w") as handle:
+        handle.write(
+            "model\tthreshold\tfar\tfrr\tprecision\trecall\tf1\t"
+            "music_fa\tclean_speech_fr\n"
+        )
+        for row in validation_sweep:
+            handle.write(
+                f"{row['model']}\t{row['threshold']}\t{row['far']}\t{row['frr']}\t"
+                f"{row['precision']}\t{row['recall']}\t{row['f1']}\t"
+                f"{row['music_fa']}\t{row['clean_speech_fr']}\n"
+            )
+
+    feature_importance = {
+        name: float(value)
+        for name, value in zip(FEATURE_NAMES, clf.feature_importances_)
+    }
+    _write_json(artifact_dir / "feature_importance.json", feature_importance)
+
+    validation_rows = _prediction_rows(
+        validation_entries, y_validation, validation_probabilities,
+        selected_threshold,
+    )
+    test_rows = _prediction_rows(
+        test_entries, y_test, test_probabilities, selected_threshold,
+    )
+    _write_prediction_csv(
+        artifact_dir / "validation_predictions.csv", validation_rows,
+    )
+    _write_prediction_csv(artifact_dir / "test_predictions.csv", test_rows)
+    _write_prediction_csv(
+        artifact_dir / "false_accepts_test.csv",
+        [row for row in test_rows if row["target"] == 0 and row["binary_prediction"] == 1],
+    )
+    _write_prediction_csv(
+        artifact_dir / "false_rejects_test.csv",
+        [row for row in test_rows if row["target"] == 1 and row["binary_prediction"] == 0],
+    )
+    _write_feature_table(
+        artifact_dir / "validation_features.npz", X_validation, y_validation,
+        gate_validation, validation_entries,
+    )
+    _write_feature_table(
+        artifact_dir / "test_features.npz", X_test, y_test, gate_test, test_entries,
+    )
+
+    split_document = {"schema_version": "quality-split-summary-v1"}
+    split_document.update({
+        name: {
+            "label_path": portable_repo_path(path, REPO_ROOT),
+            "label_sha256": label_hashes[name],
+            **split_summary(split_records[name]),
+        }
+        for name, path in label_paths.items()
+    })
+    _write_json(artifact_dir / "split_summary.json", split_document)
+    _write_json(artifact_dir / "overlap_report.json", overlap_report)
+
+    verification_path = artifact_dir / "reload_verification.json"
+    verify_command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--verify-artifact", str(artifact_dir),
+        "--verification-out", str(verification_path),
+    ]
+    subprocess.run(verify_command, cwd=REPO_ROOT, check=True)
+
+    metadata = _build_model_metadata(
+        clf,
+        selected_threshold,
+        label_paths,
+        label_hashes,
+        split_records,
+        git_state,
+        artifact_dir,
+        command_argv,
+    )
+    _write_json(artifact_dir / "model_metadata.json", metadata)
+
+    print("\nAuthoritative training complete.")
+    print(f"Selected validation threshold: {selected_threshold}")
+    print(json.dumps({
+        "validation": validation_metrics["metrics_at_selected_threshold"],
+        "test": test_metrics["metrics_at_selected_threshold"],
+    }, indent=2, sort_keys=True))
+
+
 def main() -> None:
+    process_argv = list(
+        getattr(sys, "orig_argv", [sys.executable, *sys.argv])
+    )
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -545,10 +1092,31 @@ def main() -> None:
                     help="Save best GBT artifact to DIR (joblib + schema + operating point + metrics)")
     ap.add_argument("--eval-artifact", default=None, metavar="DIR",
                     help="Load artifact from DIR and evaluate on --labels; skip training")
+    ap.add_argument("--authoritative-protocol", action="store_true",
+                    help="Run the strict train/validation/test GBT protocol")
+    ap.add_argument("--verify-artifact", default=None, metavar="DIR",
+                    help="Verify a saved authoritative artifact in a fresh process")
+    ap.add_argument("--verification-out", default=None, metavar="PATH",
+                    help="Write --verify-artifact results to PATH")
     args = ap.parse_args()
 
     # Resolve relative paths from the repo root (3 levels up from this file).
     _repo = os.path.dirname(os.path.dirname(os.path.dirname(_HERE)))
+
+    if args.verify_artifact:
+        artifact_dir = _resolve_repo_path(args.verify_artifact)
+        output_path = (
+            _resolve_repo_path(args.verification_out)
+            if args.verification_out
+            else artifact_dir / "reload_verification.json"
+        )
+        _verify_authoritative_artifact(artifact_dir, output_path)
+        return
+
+    if args.authoritative_protocol:
+        _run_authoritative_protocol(args, process_argv)
+        return
+
     if not os.path.isabs(args.labels):
         args.labels = os.path.join(_repo, args.labels)
     if args.train_labels and not os.path.isabs(args.train_labels):

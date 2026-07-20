@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
 build_quality_train.py
-Build a larger labeled training set for the learned quality predictor.
+Build labeled train/validation/test data for the learned quality predictor.
 
-Speech-derived labels use librispeech_test_clean, which is completely
-disjoint from eval_subset (built from dev-clean).  Music and noise sources
-already present in eval_subset are excluded to prevent leakage.
+The authoritative --all-splits mode partitions shared music, noise, and RIR
+sources before rendering, excludes legacy eval_subset inputs, validates overlap,
+and writes labels only after the rendered splits pass validation.
 
 Output:
     data/processed/quality_train/     rendered WAVs (clean_speech: symlinks)
@@ -21,12 +21,14 @@ Default target counts (~1700 total):
     low_utility           150
 
 Usage:
+    python scripts/datasets/build_quality_train.py --all-splits --overwrite
     python scripts/datasets/build_quality_train.py [--overwrite] [--dry-run]
     python scripts/datasets/build_quality_train.py --counts music=100 --dry-run
 """
 
 import argparse
 import json
+import os
 import random
 import shutil
 import sys
@@ -38,6 +40,14 @@ import numpy as np
 # Shared utilities from build_eval_subset live in the same directory.
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
+from dataset_identity import (    # noqa: E402
+    assert_no_forbidden_overlap,
+    build_overlap_report,
+    canonical_source_identity,
+    deterministic_partition,
+    input_source_identities,
+    print_overlap_matrix,
+)
 from build_eval_subset import (    # noqa: E402
     CHUNK_SEC,
     SNR_MIN,
@@ -86,9 +96,27 @@ DEFAULT_COUNTS: dict[str, int] = {
     "low_utility":          150,
 }
 
+AUTHORITATIVE_SPLITS: dict[str, dict[str, object]] = {
+    "train": {
+        "speech_split": "train-clean-100",
+        "output_stem": "quality_train",
+        "seed_offset": 0,
+    },
+    "validation": {
+        "speech_split": "dev-clean",
+        "output_stem": "quality_val",
+        "seed_offset": 1,
+    },
+    "test": {
+        "speech_split": "test-clean",
+        "output_stem": "quality_test",
+        "seed_offset": 2,
+    },
+}
+
 
 def load_excluded_sources(paths) -> set:
-    """Source paths in any of the given label files — exclude from pools.
+    """Canonical input sources in any label file — exclude from pools.
 
     Accepts a single Path/str or a list of paths.  Non-existent paths are
     silently skipped.
@@ -105,21 +133,25 @@ def load_excluded_sources(paths) -> set:
                 line = line.strip()
                 if line:
                     rec = json.loads(line)
-                    src = rec.get("source", "")
-                    if src:
-                        excluded.add(src)
+                    excluded.update(input_source_identities(rec, REPO_ROOT))
     return excluded
 
 
-def _sample(pool: list, rng: random.Random, n: int) -> list:
+def _sample(pool: list, rng: random.Random, n: int, strict: bool = False) -> list:
     avail = [r for r in pool if Path(r["path"]).exists()]
     if len(avail) < n:
-        print(f"  WARN: only {len(avail)} readable records, requested {n}", file=sys.stderr)
+        message = f"only {len(avail)} readable records, requested {n}"
+        if strict:
+            raise RuntimeError(message)
+        print(f"  WARN: {message}", file=sys.stderr)
     return rng.sample(avail, min(n, len(avail)))
 
 
-def build_clean_speech(pool: list, rng: random.Random, n: int, seed: int, dry_run: bool) -> list:
-    selected = _sample(pool, rng, n)
+def build_clean_speech(
+    pool: list, rng: random.Random, n: int, seed: int, dry_run: bool,
+    strict: bool = False,
+) -> list:
+    selected = _sample(pool, rng, n, strict)
     labels = []
     for i, rec in enumerate(selected):
         src = Path(rec["path"])
@@ -128,7 +160,7 @@ def build_clean_speech(pool: list, rng: random.Random, n: int, seed: int, dry_ru
             out_path.parent.mkdir(parents=True, exist_ok=True)
             if out_path.exists() or out_path.is_symlink():
                 out_path.unlink()
-            out_path.symlink_to(src)
+            out_path.symlink_to(os.path.relpath(src, out_path.parent))
         labels.append(make_label(
             out_path=out_path, label="clean_speech", should_transcribe="yes",
             synthetic=False, source=rec["path"], source_type="clean_speech",
@@ -136,22 +168,28 @@ def build_clean_speech(pool: list, rng: random.Random, n: int, seed: int, dry_ru
             corruption_source="", snr_db=None, rir_id="", seed=seed,
             duration_sec=float(rec.get("duration_sec") or CHUNK_SEC),
             sample_rate=int(rec.get("sample_rate") or TARGET_SR),
+            generation_params={"mode": "source_file"},
         ))
     return labels
 
 
 def build_speech_in_noise(
-    pool: list, noise_pool: list, rng: random.Random, n: int, seed: int, dry_run: bool
+    pool: list, noise_pool: list, rng: random.Random, n: int, seed: int,
+    dry_run: bool, strict: bool = False,
 ) -> list:
-    selected = _sample(pool, rng, n)
+    selected = _sample(pool, rng, n, strict)
     noise_ok = [r for r in noise_pool if Path(r["path"]).exists()]
     if not noise_ok:
+        if strict:
+            raise RuntimeError("no readable noise for speech_in_noise")
         print("  WARN: no readable noise for speech_in_noise", file=sys.stderr)
         return []
     labels = []
     chunk_samples = int(CHUNK_SEC * TARGET_SR)
     for i, rec in enumerate(selected):
-        snr_db = rng.uniform(SNR_MIN, SNR_MAX)
+        # Quantize before rendering so the persisted value is the exact
+        # transformation parameter used to create the audio.
+        snr_db = round(rng.uniform(SNR_MIN, SNR_MAX), 6)
         noise_rec = rng.choice(noise_ok)
         out_path = OUT_DIR / "speech_in_noise" / f"speech_in_noise_{i:04d}.wav"
         if not dry_run:
@@ -169,18 +207,22 @@ def build_speech_in_noise(
             synthetic=True, source=rec["path"], source_type="clean_speech",
             base_utterance_id=rec.get("utterance_id", ""),
             corruption_source=noise_rec["path"],
-            snr_db=round(snr_db, 1), rir_id="", seed=seed,
+            snr_db=snr_db, rir_id="", seed=seed,
             duration_sec=CHUNK_SEC, sample_rate=TARGET_SR,
+            generation_params={"mix": "rms_snr", "target_sec": CHUNK_SEC},
         ))
     return labels
 
 
 def build_speech_in_reverb(
-    pool: list, rir_pool: list, rng: random.Random, n: int, seed: int, dry_run: bool
+    pool: list, rir_pool: list, rng: random.Random, n: int, seed: int,
+    dry_run: bool, strict: bool = False,
 ) -> list:
-    selected = _sample(pool, rng, n)
+    selected = _sample(pool, rng, n, strict)
     rir_ok = [r for r in rir_pool if Path(r["path"]).exists()]
     if not rir_ok:
+        if strict:
+            raise RuntimeError("no readable RIRs for speech_in_reverb")
         print("  WARN: no readable RIRs for speech_in_reverb", file=sys.stderr)
         return []
     labels = []
@@ -201,16 +243,25 @@ def build_speech_in_reverb(
             corruption_source=rir_rec["path"],
             snr_db=None, rir_id=Path(rir_rec["path"]).stem, seed=seed,
             duration_sec=CHUNK_SEC, sample_rate=TARGET_SR,
+            generation_params={"convolution": "full_truncated", "target_sec": CHUNK_SEC},
         ))
     return labels
 
 
 def build_music(
-    pool: list, rng: random.Random, n: int, seed: int, dry_run: bool, excluded: set
+    pool: list, rng: random.Random, n: int, seed: int, dry_run: bool,
+    excluded: set, strict: bool = False,
 ) -> list:
-    avail = [r for r in pool if Path(r["path"]).exists() and r["path"] not in excluded]
+    avail = [
+        r for r in pool
+        if Path(r["path"]).exists()
+        and canonical_source_identity(r["path"], REPO_ROOT) not in excluded
+    ]
     if len(avail) < n:
-        print(f"  WARN: only {len(avail)} music records after exclusion, requested {n}", file=sys.stderr)
+        message = f"only {len(avail)} music records after exclusion, requested {n}"
+        if strict:
+            raise RuntimeError(message)
+        print(f"  WARN: {message}", file=sys.stderr)
     selected = rng.sample(avail, min(n, len(avail)))
     labels = []
     chunk_samples = int(CHUNK_SEC * TARGET_SR)
@@ -227,6 +278,7 @@ def build_music(
             base_utterance_id="", corruption_source="",
             snr_db=None, rir_id="", seed=seed,
             duration_sec=CHUNK_SEC, sample_rate=TARGET_SR,
+            generation_params={"mode": "trim_or_repeat", "target_sec": CHUNK_SEC},
         ))
     return labels
 
@@ -234,13 +286,19 @@ def build_music(
 def build_stationary_noise(
     noise_pool: list, demand_pool: list,
     rng: random.Random, n: int, seed: int, dry_run: bool, excluded: set,
+    strict: bool = False,
 ) -> list:
     pool = (
-        [r for r in demand_pool if Path(r["path"]).exists() and r["path"] not in excluded] +
-        [r for r in noise_pool  if Path(r["path"]).exists() and r["path"] not in excluded]
+        [r for r in demand_pool if Path(r["path"]).exists()
+         and canonical_source_identity(r["path"], REPO_ROOT) not in excluded] +
+        [r for r in noise_pool if Path(r["path"]).exists()
+         and canonical_source_identity(r["path"], REPO_ROOT) not in excluded]
     )
     if len(pool) < n:
-        print(f"  WARN: only {len(pool)} noise records after exclusion, requested {n}", file=sys.stderr)
+        message = f"only {len(pool)} noise records after exclusion, requested {n}"
+        if strict:
+            raise RuntimeError(message)
+        print(f"  WARN: {message}", file=sys.stderr)
     selected = rng.sample(pool, min(n, len(pool)))
     labels = []
     chunk_samples = int(CHUNK_SEC * TARGET_SR)
@@ -257,16 +315,21 @@ def build_stationary_noise(
             base_utterance_id="", corruption_source="",
             snr_db=None, rir_id="", seed=seed,
             duration_sec=CHUNK_SEC, sample_rate=TARGET_SR,
+            generation_params={"mode": "trim_or_repeat", "target_sec": CHUNK_SEC},
         ))
     return labels
 
 
-def build_clipped(pool: list, rng: random.Random, n: int, seed: int, dry_run: bool) -> list:
-    selected = _sample(pool, rng, n)
+def build_clipped(
+    pool: list, rng: random.Random, n: int, seed: int, dry_run: bool,
+    strict: bool = False,
+) -> list:
+    selected = _sample(pool, rng, n, strict)
     labels = []
     chunk_samples = int(CHUNK_SEC * TARGET_SR)
     for i, rec in enumerate(selected):
-        clip_thresh = rng.uniform(0.1, 0.4)
+        # Quantize before rendering for the same provenance guarantee as SNR.
+        clip_thresh = round(rng.uniform(0.1, 0.4), 6)
         out_path = OUT_DIR / "clipped_or_distorted" / f"clipped_{i:04d}.wav"
         if not dry_run:
             audio = load_mono_16k(Path(rec["path"]))
@@ -280,12 +343,19 @@ def build_clipped(pool: list, rng: random.Random, n: int, seed: int, dry_run: bo
             corruption_source=f"hard_clip@{clip_thresh:.2f}",
             snr_db=None, rir_id="", seed=seed,
             duration_sec=CHUNK_SEC, sample_rate=TARGET_SR,
+            generation_params={
+                "clip_threshold": clip_thresh,
+                "target_sec": CHUNK_SEC,
+            },
         ))
     return labels
 
 
-def build_low_utility(pool: list, rng: random.Random, n: int, seed: int, dry_run: bool) -> list:
-    selected = _sample(pool, rng, n)
+def build_low_utility(
+    pool: list, rng: random.Random, n: int, seed: int, dry_run: bool,
+    strict: bool = False,
+) -> list:
+    selected = _sample(pool, rng, n, strict)
     labels = []
     chunk_samples = int(CHUNK_SEC * TARGET_SR)
     for i, rec in enumerate(selected):
@@ -306,14 +376,259 @@ def build_low_utility(pool: list, rng: random.Random, n: int, seed: int, dry_run
             corruption_source="silence_pad+attenuation",
             snr_db=None, rir_id="", seed=seed,
             duration_sec=CHUNK_SEC, sample_rate=TARGET_SR,
+            generation_params={
+                "gain": 0.05,
+                "keep_sec": 0.5,
+                "source_region": "tail",
+                "target_sec": CHUNK_SEC,
+            },
         ))
     return labels
+
+
+def _parse_counts(tokens: list[str]) -> dict[str, int]:
+    counts = dict(DEFAULT_COUNTS)
+    for item in tokens:
+        key, separator, value = item.partition("=")
+        if not separator or key not in counts:
+            raise ValueError(f"unknown --counts token: {item}")
+        count = int(value)
+        if count < 0:
+            raise ValueError(f"negative --counts value: {item}")
+        counts[key] = count
+    return counts
+
+
+def _filter_excluded(records: list[dict], excluded: set[str]) -> list[dict]:
+    return [
+        record for record in records
+        if canonical_source_identity(record["path"], REPO_ROOT) not in excluded
+    ]
+
+
+def _require_manifest(name: str) -> list[dict]:
+    path = MAN_DIR / name
+    records = load_manifest(path)
+    if not records:
+        raise RuntimeError(f"required manifest is missing or empty: {path}")
+    return records
+
+
+def _build_authoritative_split(
+    split_name: str,
+    speech_pool: list[dict],
+    music_pool: list[dict],
+    noise_pool: list[dict],
+    rir_pool: list[dict],
+    counts: dict[str, int],
+    seed: int,
+    dry_run: bool,
+) -> list[dict]:
+    global OUT_DIR, LABEL_PATH
+
+    output_stem = str(AUTHORITATIVE_SPLITS[split_name]["output_stem"])
+    OUT_DIR = PROC_DIR / output_stem
+    LABEL_PATH = LABEL_DIR / f"{output_stem}.jsonl"
+    rng = random.Random(seed)
+
+    labels: list[dict] = []
+    labels += build_clean_speech(
+        speech_pool, rng, counts["clean_speech"], seed, dry_run, strict=True,
+    )
+    labels += build_speech_in_noise(
+        speech_pool, noise_pool, rng, counts["speech_in_noise"], seed,
+        dry_run, strict=True,
+    )
+    labels += build_speech_in_reverb(
+        speech_pool, rir_pool, rng, counts["speech_in_reverb"], seed,
+        dry_run, strict=True,
+    )
+    labels += build_music(
+        music_pool, rng, counts["music"], seed, dry_run, set(), strict=True,
+    )
+    labels += build_stationary_noise(
+        noise_pool, [], rng, counts["stationary_noise"], seed, dry_run,
+        set(), strict=True,
+    )
+    labels += build_clipped(
+        speech_pool, rng, counts["clipped_or_distorted"], seed,
+        dry_run, strict=True,
+    )
+    labels += build_low_utility(
+        speech_pool, rng, counts["low_utility"], seed, dry_run, strict=True,
+    )
+    return labels
+
+
+def _assert_expected_counts(
+    split_name: str,
+    records: list[dict],
+    counts: dict[str, int],
+) -> None:
+    actual = Counter(record["label"] for record in records)
+    if len(records) != sum(counts.values()) or actual != Counter(counts):
+        raise RuntimeError(
+            f"{split_name} row-count mismatch: expected={counts}, actual={dict(actual)}"
+        )
+
+
+def _assert_portable_records(splits: dict[str, list[dict]]) -> None:
+    for split_name, records in splits.items():
+        encoded = "\n".join(json.dumps(record, sort_keys=True) for record in records)
+        if "/home/apr" in encoded:
+            raise RuntimeError(f"machine-specific path found in {split_name} labels")
+
+
+def _write_labels(path: Path, records: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as handle:
+        for record in records:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def _run_all_splits(
+    counts: dict[str, int],
+    seed: int,
+    dry_run: bool,
+    overwrite: bool,
+) -> None:
+    split_names = list(AUTHORITATIVE_SPLITS)
+    output_paths = {
+        name: {
+            "labels": LABEL_DIR / f"{spec['output_stem']}.jsonl",
+            "audio": PROC_DIR / str(spec["output_stem"]),
+        }
+        for name, spec in AUTHORITATIVE_SPLITS.items()
+    }
+
+    print("Planned authoritative outputs:")
+    for name in split_names:
+        print(f"  {name:10s} labels={output_paths[name]['labels']}")
+        print(f"  {'':10s} audio ={output_paths[name]['audio']}")
+    print(f"Seed: {seed}")
+    print(f"Counts per split: {counts}")
+    print(f"Dry run: {dry_run}")
+    print()
+
+    eval_excluded = load_excluded_sources(EVAL_LABEL)
+    speech_pools: dict[str, list[dict]] = {}
+    for name, spec in AUTHORITATIVE_SPLITS.items():
+        manifest = SPLIT_TO_MANIFEST[str(spec["speech_split"])]
+        speech_pools[name] = _filter_excluded(
+            _require_manifest(manifest), eval_excluded,
+        )
+
+    music = _filter_excluded(_require_manifest("musan_music.jsonl"), eval_excluded)
+    noise = _filter_excluded(
+        _require_manifest("musan_noise.jsonl") + _require_manifest("demand_16k.jsonl"),
+        eval_excluded,
+    )
+    rirs = _filter_excluded(
+        [
+            record for record in _require_manifest("rirs.jsonl")
+            if record.get("rir_type") == "simulated"
+        ],
+        eval_excluded,
+    )
+    if not rirs:
+        raise RuntimeError("no simulated RIRs remain after exclusions")
+
+    identity = lambda record: canonical_source_identity(record["path"], REPO_ROOT)
+    music_splits = deterministic_partition(music, split_names, seed + 1000, identity)
+    noise_splits = deterministic_partition(noise, split_names, seed + 2000, identity)
+    rir_splits = deterministic_partition(rirs, split_names, seed + 3000, identity)
+
+    print(f"Legacy eval exclusions: {len(eval_excluded)} canonical inputs")
+    for name in split_names:
+        print(
+            f"  {name:10s} speech={len(speech_pools[name])} "
+            f"music={len(music_splits[name])} noise={len(noise_splits[name])} "
+            f"rirs={len(rir_splits[name])}"
+        )
+    print()
+
+    planned: dict[str, list[dict]] = {}
+    for name, spec in AUTHORITATIVE_SPLITS.items():
+        split_seed = seed + int(spec["seed_offset"])
+        planned[name] = _build_authoritative_split(
+            name,
+            speech_pools[name],
+            music_splits[name],
+            noise_splits[name],
+            rir_splits[name],
+            counts,
+            split_seed,
+            dry_run=True,
+        )
+        _assert_expected_counts(name, planned[name], counts)
+
+    _assert_portable_records(planned)
+    planned_overlap = build_overlap_report(planned, REPO_ROOT)
+    print("Planned overlap matrix:")
+    print_overlap_matrix(planned_overlap)
+    assert_no_forbidden_overlap(planned_overlap)
+
+    if dry_run:
+        print("\nDry run passed; no files were written.")
+        return
+
+    occupied = []
+    for paths in output_paths.values():
+        label_path = paths["labels"]
+        audio_dir = paths["audio"]
+        if label_path.exists() or (audio_dir.exists() and any(audio_dir.rglob("*"))):
+            occupied.extend([str(label_path), str(audio_dir)])
+    if occupied and not overwrite:
+        raise RuntimeError(
+            "authoritative outputs already exist; use --overwrite: " + ", ".join(occupied)
+        )
+
+    if overwrite:
+        for paths in output_paths.values():
+            audio_dir = paths["audio"]
+            label_path = paths["labels"]
+            if audio_dir.exists():
+                shutil.rmtree(audio_dir)
+            if label_path.exists():
+                label_path.unlink()
+
+    rendered: dict[str, list[dict]] = {}
+    for name, spec in AUTHORITATIVE_SPLITS.items():
+        print(f"Rendering {name} ...", flush=True)
+        split_seed = seed + int(spec["seed_offset"])
+        rendered[name] = _build_authoritative_split(
+            name,
+            speech_pools[name],
+            music_splits[name],
+            noise_splits[name],
+            rir_splits[name],
+            counts,
+            split_seed,
+            dry_run=False,
+        )
+        _assert_expected_counts(name, rendered[name], counts)
+
+    _assert_portable_records(rendered)
+    rendered_overlap = build_overlap_report(
+        rendered, REPO_ROOT, include_content_hashes=True,
+    )
+    print("\nRendered overlap matrix:")
+    print_overlap_matrix(rendered_overlap)
+    assert_no_forbidden_overlap(rendered_overlap)
+
+    for name in split_names:
+        _write_labels(output_paths[name]["labels"], rendered[name])
+    print("\nAuthoritative labels written after overlap validation.")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument(
+        "--all-splits", action="store_true",
+        help="Build authoritative disjoint train/validation/test outputs",
     )
     ap.add_argument(
         "--speech-split", default="test-clean",
@@ -334,6 +649,17 @@ def main() -> None:
                     help="Plan only; no writes")
     args = ap.parse_args()
 
+    try:
+        counts = _parse_counts(args.counts)
+    except (TypeError, ValueError) as exc:
+        ap.error(str(exc))
+
+    if args.all_splits:
+        if args.output_labels or args.output_dir:
+            ap.error("--output-labels/--output-dir cannot be used with --all-splits")
+        _run_all_splits(counts, args.seed, args.dry_run, args.overwrite)
+        return
+
     # Resolve output paths from split name unless explicitly overridden.
     split_key  = SPLIT_TO_OUTPUT[args.speech_split]
     out_dir    = Path(args.output_dir)    if args.output_dir    else PROC_DIR  / split_key
@@ -344,14 +670,6 @@ def main() -> None:
     global OUT_DIR, LABEL_PATH
     OUT_DIR    = out_dir
     LABEL_PATH = label_path
-
-    counts: dict[str, int] = dict(DEFAULT_COUNTS)
-    for item in args.counts:
-        k, _, v = item.partition("=")
-        if k in counts and v:
-            counts[k] = int(v)
-        else:
-            print(f"  WARN: unknown or invalid --counts token '{item}'", file=sys.stderr)
 
     print(f"Speech split:  {args.speech_split}")
     print(f"Output labels: {label_path}")

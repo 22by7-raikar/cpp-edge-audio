@@ -46,6 +46,11 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from dataset_identity import (
+    canonical_source_identity,
+    portable_reference,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MAN_DIR = REPO_ROOT / "data" / "manifests"
 OUT_DIR = REPO_ROOT / "data" / "processed" / "eval_subset"
@@ -53,13 +58,8 @@ LABEL_PATH = REPO_ROOT / "data" / "labels" / "eval_subset.jsonl"
 
 
 def _to_rel(path) -> str:
-    """Return path as a repo-relative string if it is under REPO_ROOT, else unchanged."""
-    if not path:
-        return str(path) if path is not None else ""
-    try:
-        return str(Path(path).relative_to(REPO_ROOT))
-    except (ValueError, TypeError):
-        return str(path)
+    """Return a stable repository/dataset-relative value."""
+    return portable_reference(path, REPO_ROOT)
 
 
 def resolve_path(path: str) -> Path:
@@ -148,6 +148,7 @@ def load_manifest(path: Path) -> list[dict]:
             if not Path(rec["path"]).is_absolute():
                 rec = dict(rec)
                 rec["path"] = str(REPO_ROOT / rec["path"])
+            rec["source_identity"] = canonical_source_identity(rec["path"], REPO_ROOT)
             rows.append(rec)
     return rows
 
@@ -186,6 +187,7 @@ def make_label(
     seed: int,
     duration_sec: float,
     sample_rate: int,
+    generation_params: dict | None = None,
 ) -> dict:
     return {
         "path": _to_rel(out_path),
@@ -199,6 +201,7 @@ def make_label(
         "snr_db": snr_db,
         "rir_id": rir_id,
         "generation_seed": seed,
+        "generation_params": generation_params or {},
         "duration_sec": round(float(duration_sec), 4),
         "sample_rate": int(sample_rate),
     }

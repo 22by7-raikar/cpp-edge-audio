@@ -1,0 +1,193 @@
+{
+  "argv": [
+    "python",
+    "tools/python/training/train_quality_model.py",
+    "--authoritative-protocol",
+    "--train-labels",
+    "data/labels/quality_train.jsonl",
+    "--val-labels",
+    "data/labels/quality_val.jsonl",
+    "--test-labels",
+    "data/labels/quality_test.jsonl",
+    "--save-artifact",
+    "artifacts/quality_model_neura_v1",
+    "--seed",
+    "42"
+  ],
+  "artifact_file_hashes": {
+    "false_accepts_test.csv": "76b9fb3213594ac0728cbcf7dc8f4dcff963d2ec66c88ca1a9fea101cc067847",
+    "false_rejects_test.csv": "3fbd61f59703b38bfb1206d061b9518f906c95bf8849d8104ad8842726963ea6",
+    "feature_importance.json": "f6bab54a69fc77a3803f45870251dbc1befafdb68d6f1b92cd1c69914f5201cb",
+    "feature_schema.json": "0cba95ac5959ff0389ff16565d8d6fc86de2c89a8de5e250bbc789c891d114fd",
+    "operating_point.json": "5dbac48375450ef63d8a6e9fc62a7f39377cb31f205aa9b4b5a35dcf00f6a736",
+    "overlap_report.json": "c9d605c9963e4c623074795cf7c419df72e672fad7ca00311617271cdf327328",
+    "quality_gbt.joblib": "045481f2ca42739495e814573c2575cb5cfd8520d521b4a4d5ba2df4d4f4358b",
+    "reload_verification.json": "08619f1d68bc8da206b9eb1fd0cd35c6a72b408e8cdd9b27c44781811d6ffad2",
+    "split_summary.json": "8973228d39a9e55f2b2b427db07a1193abdbf54ab52ed5a46a389313075f43ad",
+    "test_features.npz": "1a057b40cd8dc953f3f68564ba51b1ed1f0d020fbb6308040ace2e5c5323ae76",
+    "test_metrics.json": "2e7104e6163d1d3163584888fa3c7089a2f1f6a6f4b62c7f11dc23844846c825",
+    "test_predictions.csv": "105e845bccdfbfa1bc4fb8504e92beaf3827b92ca868dd975acb5cf8d34f0796",
+    "threshold_sweep.tsv": "fd12f4147aec12ad18d4c4805ece964dd79304f580e043aecdd98fb1837b4ca7",
+    "validation_features.npz": "524291aa27c62a974116a37ae8f9db2c1f5e7d8b3a875adad3ae2d8ad355e935",
+    "validation_metrics.json": "3e4dd67af267367b669a0c927cc5866c10e562c6cf547783c4aed1b5dd2acc9b",
+    "validation_predictions.csv": "7e116b180d82046602983bdb3a2aeb4a7174af2e7104e18b7409a225e1c10a6c"
+  },
+  "artifact_hash_scope_excludes": [
+    "model_metadata.json"
+  ],
+  "code_paths": {
+    "dataset_identity": "scripts/datasets/dataset_identity.py",
+    "feature_generation": "tools/python/eval/gate_eval.py",
+    "split_generation": "scripts/datasets/build_quality_train.py",
+    "training": "tools/python/training/train_quality_model.py"
+  },
+  "dataset_sources": [
+    "LibriSpeech train-clean-100",
+    "LibriSpeech dev-clean",
+    "LibriSpeech test-clean",
+    "MUSAN music and noise",
+    "DEMAND 16 kHz noise",
+    "RIRS_NOISES simulated RIRs"
+  ],
+  "exact_command_line": "python tools/python/training/train_quality_model.py --authoritative-protocol --train-labels data/labels/quality_train.jsonl --val-labels data/labels/quality_val.jsonl --test-labels data/labels/quality_test.jsonl --save-artifact artifacts/quality_model_neura_v1 --seed 42",
+  "git": {
+    "commit": "efc397e21160c9687668b22c65352cc2edca8851",
+    "dirty": true
+  },
+  "label_files": {
+    "test": {
+      "path": "data/labels/quality_test.jsonl",
+      "sha256": "4494ea9ffcbe3183cf3bc2ebc88238ab0e8a4be9f431e607b37d50c1fa7d143b",
+      "summary": {
+        "class_counts": {
+          "no": 700,
+          "yes": 1000
+        },
+        "label_counts": {
+          "clean_speech": 400,
+          "clipped_or_distorted": 200,
+          "low_utility": 150,
+          "music": 200,
+          "speech_in_noise": 400,
+          "speech_in_reverb": 200,
+          "stationary_noise": 150
+        },
+        "rows": 1700,
+        "unique_base_utterance_ids": 1114,
+        "unique_output_paths": 1700
+      }
+    },
+    "train": {
+      "path": "data/labels/quality_train.jsonl",
+      "sha256": "44dd52a8a0ed039c9dee7efb0b46a435ea0516a79c63dec0419725f4638a1b20",
+      "summary": {
+        "class_counts": {
+          "no": 700,
+          "yes": 1000
+        },
+        "label_counts": {
+          "clean_speech": 400,
+          "clipped_or_distorted": 200,
+          "low_utility": 150,
+          "music": 200,
+          "speech_in_noise": 400,
+          "speech_in_reverb": 200,
+          "stationary_noise": 150
+        },
+        "rows": 1700,
+        "unique_base_utterance_ids": 1324,
+        "unique_output_paths": 1700
+      }
+    },
+    "validation": {
+      "path": "data/labels/quality_val.jsonl",
+      "sha256": "044b662aaaab549faff6e968cead264bf089127f593e543d607b590260dea107",
+      "summary": {
+        "class_counts": {
+          "no": 700,
+          "yes": 1000
+        },
+        "label_counts": {
+          "clean_speech": 400,
+          "clipped_or_distorted": 200,
+          "low_utility": 150,
+          "music": 200,
+          "speech_in_noise": 400,
+          "speech_in_reverb": 200,
+          "stationary_noise": 150
+        },
+        "rows": 1700,
+        "unique_base_utterance_ids": 1084,
+        "unique_output_paths": 1700
+      }
+    }
+  },
+  "model_hyperparameters": {
+    "ccp_alpha": 0.0,
+    "criterion": "friedman_mse",
+    "init": null,
+    "learning_rate": 0.1,
+    "loss": "log_loss",
+    "max_depth": 3,
+    "max_features": null,
+    "max_leaf_nodes": null,
+    "min_impurity_decrease": 0.0,
+    "min_samples_leaf": 1,
+    "min_samples_split": 2,
+    "min_weight_fraction_leaf": 0.0,
+    "n_estimators": 100,
+    "n_iter_no_change": null,
+    "random_state": 42,
+    "subsample": 1.0,
+    "tol": 0.0001,
+    "validation_fraction": 0.1,
+    "verbose": 0,
+    "warm_start": false
+  },
+  "model_type": "GradientBoostingClassifier",
+  "ordered_feature_names": [
+    "rms_mean",
+    "silence_ratio_mean",
+    "clipping_ratio_mean",
+    "zcr_mean",
+    "flatness_mean",
+    "centroid_hz_mean",
+    "rolloff_hz_mean",
+    "flux_mean",
+    "band_low_mean",
+    "band_mid_mean",
+    "band_high_mean",
+    "active_frac_mean",
+    "rms_max",
+    "silence_ratio_max",
+    "clipping_ratio_max",
+    "zcr_max",
+    "flatness_max",
+    "centroid_hz_max",
+    "rolloff_hz_max",
+    "flux_max",
+    "band_low_max",
+    "band_mid_max",
+    "band_high_max",
+    "active_frac_max",
+    "gate_pass_frac",
+    "gate_borderline_frac",
+    "gate_fail_frac"
+  ],
+  "ordered_feature_schema_version": "quality-file-features-v1",
+  "package_versions": {
+    "SoundFile": "0.13.1",
+    "joblib": "1.5.3",
+    "numpy": "2.4.4",
+    "scikit-learn": "1.8.0"
+  },
+  "python": {
+    "full_version": "3.11.15 (main, Mar 11 2026, 17:20:07) [GCC 14.3.0]",
+    "version": "3.11.15"
+  },
+  "schema_version": "quality-model-metadata-v1",
+  "seed": 42,
+  "selected_threshold": 0.3,
+  "threshold_selected_on": "validation",
+  "utc_run_timestamp": "2026-07-20T06:14:49.135391+00:00"
+}

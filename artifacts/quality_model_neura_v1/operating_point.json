@@ -1,0 +1,64 @@
+{
+  "model": "gbt",
+  "selected_on": "validation",
+  "selection_rule": "maximum validation F1 over fixed thresholds 0.1 through 0.9",
+  "threshold": 0.3,
+  "tie_break": "lowest threshold in sweep order",
+  "validation_metrics": {
+    "clean_speech_fr": 9,
+    "f1": 0.9184,
+    "far": 0.2186,
+    "fn": 21,
+    "fp": 153,
+    "frr": 0.021,
+    "music_fa": 74,
+    "per_label": {
+      "clean_speech": {
+        "fn": 9,
+        "fp": 0,
+        "tn": 0,
+        "tp": 391
+      },
+      "clipped_or_distorted": {
+        "fn": 0,
+        "fp": 18,
+        "tn": 182,
+        "tp": 0
+      },
+      "low_utility": {
+        "fn": 0,
+        "fp": 0,
+        "tn": 150,
+        "tp": 0
+      },
+      "music": {
+        "fn": 0,
+        "fp": 74,
+        "tn": 126,
+        "tp": 0
+      },
+      "speech_in_noise": {
+        "fn": 7,
+        "fp": 0,
+        "tn": 0,
+        "tp": 393
+      },
+      "speech_in_reverb": {
+        "fn": 5,
+        "fp": 0,
+        "tn": 0,
+        "tp": 195
+      },
+      "stationary_noise": {
+        "fn": 0,
+        "fp": 61,
+        "tn": 89,
+        "tp": 0
+      }
+    },
+    "precision": 0.8648,
+    "recall": 0.979,
+    "tn": 547,
+    "tp": 979
+  }
+}

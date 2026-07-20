@@ -1,8 +1,13 @@
 name: audio_king
+
 channels:
   - conda-forge
+  - defaults
+
 dependencies:
   - python=3.11
-  - numpy
-  - soundfile
-  - scikit-learn
+  - numpy=2.4.4
+  - scikit-learn=1.8.0
+  - joblib=1.5.3
+  - pysoundfile=0.13.1
+  - pytest=9.0.3
