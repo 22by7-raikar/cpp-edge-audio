@@ -41,6 +41,8 @@ Frozen held-out feature-table evaluation, 1,700 examples. ASR calls mean one fil
 | Learned | 986 | 157 | 543 | 14 | 0.9202 | 1,143 | 32.76% |
 | Hybrid heuristic | 944 | 127 | 573 | 56 | 0.9116 | 1,071 | 37.00% |
 
+![Policy comparison: held-out F1 and ASR calls avoided](docs/assets/quality_policy_comparison.svg)
+
 Native export/parity results:
 
 - 100 depth-3 trees, 1,488 nodes, 27 ordered features.
@@ -60,7 +62,7 @@ These are three distinct scopes: the frozen table above, a 1,300-WAV native runt
 
 ## Setup
 
-The checked-in Conda environment is `audio_king`.
+The environment defined by environment.yml is named audio_king.
 
 ```bash
 conda activate audio_king
