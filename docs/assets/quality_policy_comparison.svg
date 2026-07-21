@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="350" viewBox="0 0 960 350" role="img" aria-labelledby="title description">
+  <title id="title">Quality policy comparison</title>
+  <desc id="description">Comparison of held-out F1 and ASR calls avoided for rule, learned, and hybrid quality policies.</desc>
+  <style>
+    .bg { fill: #101827; }
+    .card { fill: #172033; stroke: #334155; stroke-width: 1; }
+    .heading { fill: #f8fafc; font: 700 20px sans-serif; }
+    .name { fill: #f8fafc; font: 700 18px sans-serif; }
+    .label { fill: #cbd5e1; font: 14px sans-serif; }
+    .value { fill: #f8fafc; font: 700 16px sans-serif; }
+    .note { fill: #94a3b8; font: 13px sans-serif; }
+    .track { fill: #263247; }
+    .rule { fill: #60a5fa; }
+    .learned { fill: #34d399; }
+    .hybrid { fill: #fbbf24; }
+  </style>
+  <rect class="bg" width="960" height="350" rx="16"/>
+  <text class="heading" x="38" y="46">Held-out quality-policy comparison</text>
+  <text class="note" x="38" y="71">Frozen 1,700-example feature table · higher is better for both measures</text>
+
+  <g transform="translate(38 102)">
+    <rect class="card" width="278" height="208" rx="12"/>
+    <rect class="rule" width="6" height="208" rx="3"/>
+    <text class="name" x="24" y="36">Rule baseline</text>
+    <text class="label" x="24" y="72">F1</text><text class="value" x="238" y="72" text-anchor="end">0.8066</text>
+    <rect class="track" x="24" y="83" width="230" height="10" rx="5"/><rect class="rule" x="24" y="83" width="185" height="10" rx="5"/>
+    <text class="label" x="24" y="130">ASR calls avoided</text><text class="value" x="238" y="130" text-anchor="end">19.24%</text>
+    <rect class="track" x="24" y="141" width="230" height="10" rx="5"/><rect class="rule" x="24" y="141" width="44" height="10" rx="5"/>
+    <text class="note" x="24" y="181">1,373 estimated ASR calls</text>
+  </g>
+
+  <g transform="translate(341 102)">
+    <rect class="card" width="278" height="208" rx="12"/>
+    <rect class="learned" width="6" height="208" rx="3"/>
+    <text class="name" x="24" y="36">Learned</text>
+    <text class="label" x="24" y="72">F1</text><text class="value" x="238" y="72" text-anchor="end">0.9202</text>
+    <rect class="track" x="24" y="83" width="230" height="10" rx="5"/><rect class="learned" x="24" y="83" width="212" height="10" rx="5"/>
+    <text class="label" x="24" y="130">ASR calls avoided</text><text class="value" x="238" y="130" text-anchor="end">32.76%</text>
+    <rect class="track" x="24" y="141" width="230" height="10" rx="5"/><rect class="learned" x="24" y="141" width="75" height="10" rx="5"/>
+    <text class="note" x="24" y="181">1,143 estimated ASR calls</text>
+  </g>
+
+  <g transform="translate(644 102)">
+    <rect class="card" width="278" height="208" rx="12"/>
+    <rect class="hybrid" width="6" height="208" rx="3"/>
+    <text class="name" x="24" y="36">Hybrid</text>
+    <text class="label" x="24" y="72">F1</text><text class="value" x="238" y="72" text-anchor="end">0.9116</text>
+    <rect class="track" x="24" y="83" width="230" height="10" rx="5"/><rect class="hybrid" x="24" y="83" width="210" height="10" rx="5"/>
+    <text class="label" x="24" y="130">ASR calls avoided</text><text class="value" x="238" y="130" text-anchor="end">37.00%</text>
+    <rect class="track" x="24" y="141" width="230" height="10" rx="5"/><rect class="hybrid" x="24" y="141" width="85" height="10" rx="5"/>
+    <text class="note" x="24" y="181">1,071 estimated ASR calls</text>
+  </g>
+</svg>
