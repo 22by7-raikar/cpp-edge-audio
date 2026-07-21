@@ -85,17 +85,6 @@ set(GGML_CUDA ${GGML_CUDA} CACHE BOOL "Enable CUDA backend in whisper.cpp" FORCE
 add_subdirectory(${WHISPER_ROOT} ${CMAKE_CURRENT_BINARY_DIR}/whisper_build)
 
 # -------------------------------------------------------------------
-# Exported quality model
-# -------------------------------------------------------------------
-add_library(quality_model_native STATIC
-    src/gate/quality_model.cpp
-)
-target_include_directories(quality_model_native PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/generated
-)
-
-# -------------------------------------------------------------------
 # Pipeline executable
 # -------------------------------------------------------------------
 add_executable(audio_pipeline
@@ -189,47 +178,4 @@ if(BUILD_TESTS)
     target_link_libraries(test_pipeline PRIVATE pipeline_modules)
 
     add_test(NAME pipeline_unit_tests COMMAND test_pipeline)
-
-    add_executable(test_quality_model tests/test_quality_model.cpp)
-    target_link_libraries(test_quality_model PRIVATE quality_model_native)
-    add_test(NAME quality_model_unit_tests COMMAND test_quality_model)
-
-    add_executable(
-        test_quality_gate_runtime
-        tests/test_quality_gate_runtime.cpp
-        $<TARGET_OBJECTS:pipeline_modules>
-    )
-    target_include_directories(test_quality_gate_runtime PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/audio
-        ${WHISPER_ROOT}
-    )
-    target_link_libraries(
-        test_quality_gate_runtime
-        PRIVATE pipeline_modules quality_model_native
-    )
-    add_test(NAME quality_gate_runtime_unit_tests COMMAND test_quality_gate_runtime)
-
-    add_executable(
-        quality_policy_evaluation
-        tests/quality_policy_evaluation.cpp
-        $<TARGET_OBJECTS:pipeline_modules>
-    )
-    target_include_directories(quality_policy_evaluation PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/audio
-        ${WHISPER_ROOT}
-    )
-    target_link_libraries(
-        quality_policy_evaluation
-        PRIVATE pipeline_modules quality_model_native
-    )
-
-    add_executable(quality_model_parity tests/quality_model_parity.cpp)
-    target_link_libraries(quality_model_parity PRIVATE quality_model_native)
-    add_test(
-        NAME quality_model_cpp_parity
-        COMMAND quality_model_parity
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/quality_model_neura_v1_parity.bin
-    )
 endif()
