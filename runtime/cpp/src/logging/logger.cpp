@@ -42,6 +42,7 @@ void Logger::write(const std::string& line) {
 void Logger::log_run_start(const RunConfig& cfg) {
     run_cfg_ = cfg;
     chunk_records_.clear();
+    has_quality_summary_ = false;
 
     std::ostringstream oss;
     oss << "event=run_start"
@@ -50,7 +51,67 @@ void Logger::log_run_start(const RunConfig& cfg) {
         << "\tchunk_ms=" << cfg.chunk_ms
         << "\thop_ms="   << cfg.hop_ms
         << "\tthreads="  << cfg.n_threads
-        << "\tgate="     << (cfg.gate_enabled ? "1" : "0");
+        << "\tgate="     << (cfg.gate_enabled ? "1" : "0")
+        << "\tquality_policy=" << cfg.quality_policy
+        << "\tquality_threshold=" << cfg.quality_threshold;
+    write(oss.str());
+}
+
+void Logger::log_quality_summary(const QualitySummaryRecord& record) {
+    quality_summary_ = record;
+    has_quality_summary_ = true;
+
+    std::ostringstream oss;
+    oss << std::setprecision(17);
+    oss << "event=quality_summary"
+        << "\tpolicy=" << record.policy
+        << "\tchunk_count=" << record.chunk_count
+        << "\tschema_version=" << record.schema_version
+        << "\tlearned_raw_score=";
+    if (record.learned_evaluated) {
+        oss << record.learned_raw_score;
+    } else {
+        oss << "not_run";
+    }
+    oss << "\tlearned_probability=";
+    if (record.learned_evaluated) {
+        oss << record.learned_probability;
+    } else {
+        oss << "not_run";
+    }
+    oss << "\tlearned_inference_us=";
+    if (record.learned_evaluated) {
+        oss << record.learned_inference_us;
+    } else {
+        oss << "not_run";
+    }
+    oss << "\tthreshold=" << record.threshold
+        << "\tlearned_decision=";
+    if (record.learned_evaluated) {
+        oss << (record.learned_decision ? "admit" : "reject");
+    } else {
+        oss << "not_run";
+    }
+    oss << "\trule_summary=" << (record.rule_summary ? "admit" : "reject")
+        << "\tfinal_admission=" << (record.final_admission ? "admit" : "reject")
+        << "\tasr_ran=" << (record.asr_ran ? "1" : "0")
+        << "\trejection_reason="
+        << (record.rejection_reason.empty() ? "none" : record.rejection_reason)
+        << "\tasr_infer_ms=" << record.asr_inference_ms;
+    if (!record.transcript.empty()) {
+        std::string text = record.transcript;
+        for (char& c : text) if (c == '\t') c = ' ';
+        oss << "\ttext=" << text;
+    } else if (!record.asr_error.empty()) {
+        oss << "\tasr_error=" << record.asr_error;
+    }
+    if (record.debug_features && record.features_available) {
+        oss << "\tquality_features=";
+        for (std::size_t index = 0; index < record.features.size(); ++index) {
+            if (index > 0) oss << ',';
+            oss << record.features[index];
+        }
+    }
     write(oss.str());
 }
 
@@ -214,7 +275,9 @@ void Logger::write_json(
     f << "    \"chunk_ms\":    " << c.chunk_ms                    << ",\n";
     f << "    \"hop_ms\":      " << c.hop_ms                      << ",\n";
     f << "    \"n_threads\":   " << c.n_threads                   << ",\n";
-    f << "    \"gate_enabled\": " << jbool(c.gate_enabled)        << "\n";
+    f << "    \"gate_enabled\": " << jbool(c.gate_enabled)        << ",\n";
+    f << "    \"quality_policy\": " << jstr(c.quality_policy)      << ",\n";
+    f << "    \"quality_threshold\": " << jd(c.quality_threshold)  << "\n";
     f << "  },\n";
 
     // --- chunks ---
@@ -247,6 +310,43 @@ void Logger::write_json(
         f << "    }" << (last ? "" : ",") << "\n";
     }
     f << "  ],\n";
+
+    // --- file-level quality admission ---
+    if (has_quality_summary_) {
+        const QualitySummaryRecord& q = quality_summary_;
+        f << "  \"quality\": {\n";
+        f << "    \"policy\": " << jstr(q.policy) << ",\n";
+        f << "    \"chunk_count\": " << q.chunk_count << ",\n";
+        f << "    \"schema_version\": " << jstr(q.schema_version) << ",\n";
+        f << "    \"learned_raw_score\": ";
+        f << (q.learned_evaluated ? jd(q.learned_raw_score, 17) : "null") << ",\n";
+        f << "    \"learned_probability\": ";
+        f << (q.learned_evaluated ? jd(q.learned_probability, 17) : "null") << ",\n";
+        f << "    \"learned_inference_us\": ";
+        f << (q.learned_evaluated ? jd(q.learned_inference_us, 3) : "null") << ",\n";
+        f << "    \"threshold\": " << jd(q.threshold) << ",\n";
+        f << "    \"learned_decision\": ";
+        f << (q.learned_evaluated ? jbool(q.learned_decision) : "null") << ",\n";
+        f << "    \"rule_summary\": " << jbool(q.rule_summary) << ",\n";
+        f << "    \"final_admission\": " << jbool(q.final_admission) << ",\n";
+        f << "    \"asr_ran\": " << jbool(q.asr_ran) << ",\n";
+        f << "    \"rejection_reason\": "
+          << jstr(q.rejection_reason.empty() ? "none" : q.rejection_reason) << ",\n";
+        f << "    \"asr_inference_ms\": " << jd(q.asr_inference_ms, 3) << ",\n";
+        f << "    \"transcript\": " << jstr(q.transcript) << ",\n";
+        f << "    \"asr_error\": " << jstr(q.asr_error);
+        if (q.debug_features && q.features_available) {
+            f << ",\n    \"features\": [";
+            for (std::size_t index = 0; index < q.features.size(); ++index) {
+                if (index > 0) f << ", ";
+                f << jd(q.features[index], 9);
+            }
+            f << "]\n";
+        } else {
+            f << "\n";
+        }
+        f << "  },\n";
+    }
 
     // --- summary ---
     f << "  \"summary\": {\n";

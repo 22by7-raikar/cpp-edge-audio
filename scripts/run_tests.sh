@@ -20,7 +20,7 @@ cmake .. \
     -DWHISPER_ROOT="$REPO_ROOT/vendor/whisper.cpp" \
     -DBUILD_TESTS=ON
 
-make -j"$(nproc)" test_pipeline
+make -j"$(nproc)" test_pipeline test_quality_model test_quality_gate_runtime quality_model_parity
 
 echo ""
 echo "Running tests..."

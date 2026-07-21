@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -17,6 +18,30 @@ struct RunConfig {
     int         hop_ms      = 0;
     int         n_threads   = 4;
     bool        gate_enabled = true;
+    std::string quality_policy = "rule";
+    double      quality_threshold = 0.3;
+};
+
+struct QualitySummaryRecord {
+    std::string policy = "rule";
+    int chunk_count = 0;
+    std::string schema_version = "quality-file-features-v1";
+    bool features_available = false;
+    std::array<float, 27> features{};
+    bool debug_features = false;
+    bool learned_evaluated = false;
+    double learned_raw_score = 0.0;
+    double learned_probability = 0.0;
+    double learned_inference_us = 0.0;
+    double threshold = 0.3;
+    bool learned_decision = false;
+    bool rule_summary = false;
+    bool final_admission = false;
+    bool asr_ran = false;
+    std::string rejection_reason;
+    double asr_inference_ms = 0.0;
+    std::string transcript;
+    std::string asr_error;
 };
 
 // Writes one structured log record per chunk to stdout and optionally a TSV file.
@@ -40,6 +65,8 @@ public:
         const AsrResult&  asr,       // may be empty if gate rejected
         const SceneResult& scene = SceneResult{}
     );
+
+    void log_quality_summary(const QualitySummaryRecord& record);
 
     void log_run_end(
         int    total_chunks,
@@ -90,6 +117,8 @@ private:
         std::string text;
     };
     std::vector<ChunkRecord> chunk_records_;
+    QualitySummaryRecord quality_summary_;
+    bool has_quality_summary_ = false;
 
     void write(const std::string& line);
     void write_json(

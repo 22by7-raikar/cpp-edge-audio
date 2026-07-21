@@ -24,12 +24,17 @@
 //   --vad-only                       Run DSP VAD segmentation only; print JSON to stdout
 //   --vad-asr                        Use VAD segmentation instead of fixed-window chunking; gate + ASR still run
 //   --vad-asr-packed                 VAD segmentation with padding + merging to wider ASR windows (fewer CUDA calls)
+//   --quality-policy       <str>     rule, learned, or hybrid (default: rule)
+//   --quality-threshold    <float>   Learned probability threshold in [0,1] (default: 0.3)
+//   --quality-debug-features         Log the ordered 27-feature vector
 //
 // TODO(future): microphone capture path.
 
+#include <chrono>
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -38,6 +43,9 @@
 #include "chunker/chunker.h"
 #include "chunker/vad.h"
 #include "gate/gate.h"
+#include "gate/quality_aggregator.h"
+#include "gate/quality_model.h"
+#include "gate/quality_policy.h"
 #include "logging/logger.h"
 #include "scene/scene.h"
 #include "scene/adaptive.h"
@@ -51,6 +59,8 @@ void print_usage(const char* prog) {
            " [--chunk-ms 5000] [--hop-ms 0] [--threads 4]"
            " [--no-gate] [--no-adapt] [--rms-min 0.003] [--max-silence 0.90]"
            " [--max-clip 0.05] [--max-flatness 0.90] [--frame-size 512]"
+           " [--quality-policy rule|learned|hybrid] [--quality-threshold 0.3]"
+           " [--quality-debug-features]"
            " [--log <tsv>] [--bench-json <json>] [--language en]\n";
 }
 
@@ -74,6 +84,9 @@ struct CliArgs {
     bool        vad_only          = false;  // run VAD only, print JSON to stdout
     bool        vad_asr           = false;  // VAD segmentation instead of fixed-window chunking
     bool        vad_asr_packed     = false;  // VAD + padding/merge packing before ASR
+    pipeline::QualityPolicy quality_policy = pipeline::QualityPolicy::RULE;
+    double      quality_threshold = pipeline::kQualityDefaultThreshold;
+    bool        quality_debug_features = false;
 };
 
 bool parse_args(int argc, char** argv, CliArgs& out) {
@@ -106,6 +119,23 @@ bool parse_args(int argc, char** argv, CliArgs& out) {
         else if (a == "--vad-only")                 out.vad_only  = true;
         else if (a == "--vad-asr")                  out.vad_asr        = true;
         else if (a == "--vad-asr-packed")             out.vad_asr_packed = true;
+        else if (a == "--quality-policy") {
+            try {
+                out.quality_policy = pipeline::parse_quality_policy(next());
+            } catch (const std::invalid_argument& error) {
+                std::cerr << "ERROR: " << error.what() << "\n";
+                return false;
+            }
+        }
+        else if (a == "--quality-threshold") {
+            try {
+                out.quality_threshold = pipeline::parse_quality_threshold(next());
+            } catch (const std::invalid_argument& error) {
+                std::cerr << "ERROR: " << error.what() << "\n";
+                return false;
+            }
+        }
+        else if (a == "--quality-debug-features") out.quality_debug_features = true;
         else {
             std::cerr << "Unknown argument: " << a << "\n";
             return false;
@@ -120,6 +150,26 @@ bool parse_args(int argc, char** argv, CliArgs& out) {
         std::cerr << "ERROR: --model is required unless --gate-only or --vad-only is set.\n";
         return false;
     }
+    if (out.quality_policy != pipeline::QualityPolicy::RULE) {
+        if (out.vad_only || out.vad_asr || out.vad_asr_packed) {
+            std::cerr << "ERROR: learned and hybrid quality policies require a complete WAV boundary; VAD modes are unsupported.\n";
+            return false;
+        }
+        if (out.chunk_ms != 5000 || out.hop_ms != 0) {
+            std::cerr << "ERROR: learned and hybrid quality policies require non-overlapping 5000 ms analysis chunks.\n";
+            return false;
+        }
+        if (!out.gate_enabled) {
+            std::cerr << "ERROR: learned and hybrid quality policies require gate decisions for the 27-feature schema.\n";
+            return false;
+        }
+        if (out.frame_size != 512 || out.rms_min != 0.003 ||
+            out.max_silence != 0.90 || out.max_clip != 0.05 ||
+            out.max_flatness != 0.90) {
+            std::cerr << "ERROR: learned and hybrid quality policies require the training-time DSP and rule-gate configuration.\n";
+            return false;
+        }
+    }
     return true;
 }
 
@@ -131,6 +181,14 @@ int main(int argc, char** argv) {
         print_usage(argv[0]);
         return 1;
     }
+
+    std::cerr << "[quality] policy="
+              << pipeline::quality_policy_str(args.quality_policy)
+              << " threshold=" << args.quality_threshold;
+    if (args.quality_policy != pipeline::QualityPolicy::RULE) {
+        std::cerr << " boundary=complete_wav analysis_chunks=5000ms_non_overlapping";
+    }
+    std::cerr << "\n";
 
     // -----------------------------------------------------------
     // Logger
@@ -152,6 +210,8 @@ int main(int argc, char** argv) {
     run_cfg.hop_ms       = args.hop_ms;
     run_cfg.n_threads    = args.n_threads;
     run_cfg.gate_enabled = args.gate_enabled;
+    run_cfg.quality_policy = pipeline::quality_policy_str(args.quality_policy);
+    run_cfg.quality_threshold = args.quality_threshold;
     logger.log_run_start(run_cfg);
 
     // -----------------------------------------------------------
@@ -281,12 +341,11 @@ int main(int argc, char** argv) {
     adapt_cfg.enabled = args.adaptive_enabled;
     pipeline::AdaptiveController adaptive(adapt_cfg);
 
-    // -----------------------------------------------------------
-    // ASR engine
-    // -----------------------------------------------------------
-    // ASR engine — only initialised when not in gate-only mode.
+    // ASR model loading is deferred until the selected policy has admitted
+    // audio. Rule mode still initializes it at the same point as before.
     std::unique_ptr<pipeline::AsrEngine> asr_ptr;
-    if (!args.gate_only) {
+    auto initialize_asr = [&]() -> bool {
+        if (asr_ptr) return true;
         pipeline::AsrConfig asr_cfg;
         asr_cfg.model_path = args.model_path;
         asr_cfg.n_threads  = args.n_threads;
@@ -294,13 +353,15 @@ int main(int argc, char** argv) {
         asr_ptr = std::make_unique<pipeline::AsrEngine>(asr_cfg);
         if (!asr_ptr->ready()) {
             std::cerr << "ERROR loading model: " << asr_ptr->load_error() << "\n";
-            return 1;
+            return false;
         }
         std::cerr << "[asr] backend_requested=" << (asr_ptr->gpu_requested() ? "cuda" : "cpu")
                   << " backend_active=" << asr_ptr->backend_mode()
                   << " cpu_fallback=" << (asr_ptr->used_cpu_fallback() ? "yes" : "no")
                   << "\n";
-    } else {
+        return true;
+    };
+    if (args.gate_only) {
         std::cerr << "[asr] gate-only mode, model not loaded\n";
     }
 
@@ -311,53 +372,168 @@ int main(int argc, char** argv) {
     int    n_failed     = 0;
     int    n_borderline = 0;
     double total_infer_ms = 0.0;
+    pipeline::QualitySummaryRecord quality_summary;
+    quality_summary.policy = pipeline::quality_policy_str(args.quality_policy);
+    quality_summary.chunk_count = static_cast<int>(chunks.size());
+    quality_summary.schema_version = std::string(pipeline::quality_schema_version());
+    quality_summary.threshold = args.quality_threshold;
+    quality_summary.debug_features = args.quality_debug_features;
 
-    for (const auto& chunk : chunks) {
-        // Apply adaptive gate adjustments from previous chunk context
-        const pipeline::GateConfig effective_cfg = adaptive.adapt_gate(gate_cfg);
+    if (args.quality_policy == pipeline::QualityPolicy::RULE) {
+        if (!args.gate_only && !initialize_asr()) return 1;
 
-        // Gate
-        pipeline::GateResult gate;
-        if (args.gate_enabled) {
-            gate = pipeline::evaluate_chunk(chunk, effective_cfg);
-        } else {
-            gate.decision = pipeline::GateDecision::PASS;
-            gate.reason   = "gate_disabled";
-            // Still compute metrics for logging even when gate is off.
-            gate.metrics  = pipeline::evaluate_chunk(chunk, effective_cfg).metrics;
+        bool rule_should_transcribe = false;
+        bool asr_ran = false;
+        for (const auto& chunk : chunks) {
+            // Apply adaptive gate adjustments from previous chunk context.
+            const pipeline::GateConfig effective_cfg = adaptive.adapt_gate(gate_cfg);
+
+            pipeline::GateResult gate;
+            if (args.gate_enabled) {
+                gate = pipeline::evaluate_chunk(chunk, effective_cfg);
+            } else {
+                gate.decision = pipeline::GateDecision::PASS;
+                gate.reason   = "gate_disabled";
+                gate.metrics  = pipeline::evaluate_chunk(chunk, effective_cfg).metrics;
+            }
+
+            const pipeline::SceneResult scene =
+                pipeline::classify(gate.metrics, scene_cfg);
+            switch (gate.decision) {
+                case pipeline::GateDecision::PASS:       ++n_passed;     break;
+                case pipeline::GateDecision::FAIL:       ++n_failed;     break;
+                case pipeline::GateDecision::BORDERLINE: ++n_borderline; break;
+            }
+
+            const bool rule_admits_chunk =
+                (!args.gate_enabled ||
+                 gate.decision == pipeline::GateDecision::PASS ||
+                 gate.decision == pipeline::GateDecision::BORDERLINE) &&
+                !adaptive.skip_asr(scene.label);
+            rule_should_transcribe =
+                rule_should_transcribe || rule_admits_chunk;
+            const bool run_asr = !args.gate_only && rule_admits_chunk;
+
+            pipeline::AsrResult asr_result;
+            if (run_asr && asr_ptr) {
+                asr_ran = true;
+                asr_result = asr_ptr->transcribe(
+                    chunk.samples.data(),
+                    static_cast<int>(chunk.samples.size()));
+                total_infer_ms += asr_result.inference_ms;
+            }
+
+            adaptive.push_scene(scene.label);
+            logger.log_chunk(chunk, gate, asr_result, scene);
         }
 
-        // Scene classification (uses pre-computed metrics; always runs)
-        const pipeline::SceneResult scene = pipeline::classify(gate.metrics, scene_cfg);
+        const pipeline::QualityAdmission admission =
+            pipeline::decide_quality_admission(
+                pipeline::QualityPolicy::RULE,
+                rule_should_transcribe,
+                nullptr);
+        quality_summary.rule_summary = rule_should_transcribe;
+        quality_summary.final_admission = admission.final_should_transcribe;
+        quality_summary.asr_ran = asr_ran;
+        quality_summary.rejection_reason = admission.rejection_reason;
+        quality_summary.asr_inference_ms = total_infer_ms;
+    } else {
+        pipeline::QualityFeatureAggregator aggregator;
+        bool rule_should_transcribe = false;
 
-        // Count
-        switch (gate.decision) {
-            case pipeline::GateDecision::PASS:       ++n_passed;     break;
-            case pipeline::GateDecision::FAIL:       ++n_failed;     break;
-            case pipeline::GateDecision::BORDERLINE: ++n_borderline; break;
+        // Learned-model analysis always uses the immutable training boundary:
+        // the complete file split into non-overlapping five-second chunks.
+        // Scene/adaptive routing does not alter the learned feature vector.
+        for (const auto& chunk : chunks) {
+            const pipeline::GateResult gate =
+                pipeline::evaluate_chunk(chunk, gate_cfg);
+            const pipeline::SceneResult scene =
+                pipeline::classify(gate.metrics, scene_cfg);
+            aggregator.add(gate.metrics, gate.decision);
+
+            // Reproduce the current rule scheduler for the file-level rule
+            // summary. The learned vector still uses the fixed base gate above.
+            pipeline::GateResult rule_gate = gate;
+            if (adaptive.dominant_scene() == pipeline::SceneLabel::NOISE) {
+                rule_gate = pipeline::evaluate_chunk(
+                    chunk, adaptive.adapt_gate(gate_cfg));
+            }
+            const bool rule_admits_chunk =
+                (rule_gate.decision == pipeline::GateDecision::PASS ||
+                 rule_gate.decision == pipeline::GateDecision::BORDERLINE) &&
+                !adaptive.skip_asr(scene.label);
+            rule_should_transcribe =
+                rule_should_transcribe || rule_admits_chunk;
+
+            switch (gate.decision) {
+                case pipeline::GateDecision::PASS:
+                    ++n_passed;
+                    break;
+                case pipeline::GateDecision::BORDERLINE:
+                    ++n_borderline;
+                    break;
+                case pipeline::GateDecision::FAIL:
+                    ++n_failed;
+                    break;
+            }
+            adaptive.push_scene(scene.label);
+            logger.log_chunk(chunk, gate, pipeline::AsrResult{}, scene);
         }
 
-        // ASR: run on PASS and BORDERLINE unless gate-only or adaptive suppresses it
-        pipeline::AsrResult asr_result;
-        const bool run_asr =
-            !args.gate_only &&
-            (!args.gate_enabled ||
-             gate.decision == pipeline::GateDecision::PASS ||
-             gate.decision == pipeline::GateDecision::BORDERLINE) &&
-            !adaptive.skip_asr(scene.label);
-
-        if (run_asr && asr_ptr) {
-            asr_result = asr_ptr->transcribe(
-                chunk.samples.data(),
-                static_cast<int>(chunk.samples.size()));
-            total_infer_ms += asr_result.inference_ms;
+        if (aggregator.empty()) {
+            std::cerr << "ERROR: complete WAV produced no quality-analysis chunks\n";
+            return 1;
         }
 
-        // Update adaptive history with this chunk's scene label
-        adaptive.push_scene(scene.label);
+        const auto features = aggregator.features();
+        const auto quality_start = std::chrono::steady_clock::now();
+        const pipeline::QualityPrediction prediction =
+            pipeline::predict_quality(features, args.quality_threshold);
+        const auto quality_end = std::chrono::steady_clock::now();
+        const double learned_inference_us =
+            std::chrono::duration<double, std::micro>(
+                quality_end - quality_start).count();
+        const pipeline::QualityAdmission admission =
+            pipeline::decide_quality_admission(
+                args.quality_policy,
+                rule_should_transcribe,
+                &prediction);
 
-        logger.log_chunk(chunk, gate, asr_result, scene);
+        if (admission.final_should_transcribe && !args.gate_only &&
+            !initialize_asr()) {
+            return 1;
+        }
+        const pipeline::FileAsrExecution execution =
+            pipeline::transcribe_admitted_file_once(
+                admission.final_should_transcribe,
+                !args.gate_only,
+                audio.samples.data(),
+                audio.samples.size(),
+                [&](const float* samples, int sample_count) {
+                    return asr_ptr->transcribe(samples, sample_count);
+                });
+        if (!admission.final_should_transcribe && !args.gate_only) {
+            std::cerr << "[asr] skipped: " << admission.rejection_reason << "\n";
+        }
+        total_infer_ms = execution.result.inference_ms;
+
+        quality_summary.features_available = true;
+        quality_summary.features = features;
+        quality_summary.learned_evaluated = true;
+        quality_summary.learned_raw_score = prediction.raw_score;
+        quality_summary.learned_probability = prediction.probability;
+        quality_summary.learned_inference_us = learned_inference_us;
+        quality_summary.learned_decision = prediction.should_transcribe;
+        quality_summary.rule_summary = rule_should_transcribe;
+        quality_summary.final_admission = admission.final_should_transcribe;
+        quality_summary.asr_ran = execution.ran;
+        quality_summary.rejection_reason = admission.rejection_reason;
+        quality_summary.asr_inference_ms = execution.result.inference_ms;
+        quality_summary.transcript = execution.result.text;
+        quality_summary.asr_error = execution.result.error;
     }
+
+    logger.log_quality_summary(quality_summary);
 
     // -----------------------------------------------------------
     // Summary
