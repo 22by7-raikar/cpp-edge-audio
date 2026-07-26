@@ -30,6 +30,21 @@ inline float frame_zcr(const float* s, int n, int sample_rate) {
 
 }  // namespace
 
+bool vad_frame_is_speech(
+    const float*     frame,
+    int              frame_samples,
+    int              sample_rate,
+    const VadConfig& cfg)
+{
+    if (frame == nullptr || frame_samples <= 0 || sample_rate <= 0) {
+        return false;
+    }
+
+    const float rms = frame_rms(frame, frame_samples);
+    const float zcr = frame_zcr(frame, frame_samples, sample_rate);
+    return (rms >= cfg.energy_thresh) && (zcr < cfg.zcr_max);
+}
+
 std::vector<VadSegment> run_vad(
     const float*     samples,
     int              n_samples,
@@ -57,9 +72,8 @@ std::vector<VadSegment> run_vad(
     for (int f = 0; f < n_frames; ++f) {
         const int offset = f * hop_samp;
         // offset + frame_samp <= n_samples is guaranteed by n_frames computation
-        const float rms = frame_rms(samples + offset, frame_samp);
-        const float zcr = frame_zcr(samples + offset, frame_samp, sample_rate);
-        raw_speech[static_cast<size_t>(f)] = (rms >= cfg.energy_thresh) && (zcr < cfg.zcr_max);
+        raw_speech[static_cast<size_t>(f)] = vad_frame_is_speech(
+            samples + offset, frame_samp, sample_rate, cfg);
     }
 
     // -----------------------------------------------------------------

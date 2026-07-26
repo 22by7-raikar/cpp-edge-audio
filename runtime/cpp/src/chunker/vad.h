@@ -31,6 +31,14 @@ struct VadSegment {
     double duration_sec() const { return end_sec - start_sec; }
 };
 
+// Classify one complete mono float frame using the current RMS/ZCR rules.
+// Returns true when the frame is considered speech.
+bool vad_frame_is_speech(
+    const float*     frame,
+    int              frame_samples,
+    int              sample_rate,
+    const VadConfig& cfg = VadConfig{});
+
 // -------------------------------------------------------
 // Run frame-level DSP VAD on mono float32 PCM.
 //
