@@ -157,6 +157,7 @@ if(BUILD_TESTS)
         src/audio/audio_io.cpp
         src/chunker/chunker.cpp
         src/chunker/vad.cpp
+        src/chunker/streaming_utterance_segmenter.cpp
         src/gate/features.cpp
         src/gate/gate.cpp
         src/gate/quality_aggregator.cpp
@@ -250,4 +251,20 @@ if(BUILD_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
     add_test(NAME raw_pcm_stream_unit_tests COMMAND test_raw_pcm_stream)
+
+    # Streaming utterance segmenter — depends only on vad.cpp.
+    add_executable(test_streaming_utterance_segmenter
+        tests/test_streaming_utterance_segmenter.cpp
+        src/chunker/streaming_utterance_segmenter.cpp
+        src/chunker/vad.cpp
+    )
+    target_include_directories(test_streaming_utterance_segmenter PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    find_library(_SEG_MATH_LIB m)
+    if(_SEG_MATH_LIB)
+        target_link_libraries(test_streaming_utterance_segmenter PRIVATE ${_SEG_MATH_LIB})
+    endif()
+    add_test(NAME streaming_utterance_segmenter_unit_tests
+        COMMAND test_streaming_utterance_segmenter)
 endif()
