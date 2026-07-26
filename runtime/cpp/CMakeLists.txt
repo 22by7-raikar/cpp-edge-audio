@@ -240,4 +240,14 @@ if(BUILD_TESTS)
         COMMAND quality_model_parity
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/quality_model_neura_v1_parity.bin
     )
+
+    # Bounded S16LE PCM decoder — no external deps beyond the C++ stdlib.
+    add_executable(test_raw_pcm_stream
+        tests/test_raw_pcm_stream.cpp
+        src/audio/raw_pcm_stream.cpp
+    )
+    target_include_directories(test_raw_pcm_stream PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME raw_pcm_stream_unit_tests COMMAND test_raw_pcm_stream)
 endif()
