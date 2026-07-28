@@ -52,7 +52,7 @@ pipeline::Utterance utterance(
 }
 
 bool test_command_normalization_and_routes() {
-    CHECK(pipeline::normalize_command(" \tLOOK   LEFT!! \n") == "look left");
+    CHECK(pipeline::normalize_command(" \tTURN   RIGHT: \r\n") == "turn right");
 
     struct Case {
         const char* text;
@@ -60,6 +60,16 @@ bool test_command_normalization_and_routes() {
         const char* action;
     };
     const Case cases[] = {
+        {"stop", pipeline::RobotIntent::STOP, "stop"},
+        {"GO FORWARD", pipeline::RobotIntent::GO_FORWARD, "go_forward"},
+        {"Go   Backward!", pipeline::RobotIntent::GO_BACKWARD, "go_backward"},
+        {" turn   left, ", pipeline::RobotIntent::TURN_LEFT, "turn_left"},
+        {" turn right ", pipeline::RobotIntent::TURN_RIGHT, "turn_right"},
+        {"turn right?", pipeline::RobotIntent::TURN_RIGHT, "turn_right"},
+        {"Go forward.", pipeline::RobotIntent::GO_FORWARD, "go_forward"},
+        {"Stop.", pipeline::RobotIntent::STOP, "stop"},
+        {"stop;", pipeline::RobotIntent::STOP, "stop"},
+        {"stop:", pipeline::RobotIntent::STOP, "stop"},
         {"look left.", pipeline::RobotIntent::LOOK_LEFT, "look_left"},
         {"LOOK RIGHT?", pipeline::RobotIntent::LOOK_RIGHT, "look_right"},
         {" stop! ", pipeline::RobotIntent::STOP, "stop"},
@@ -73,9 +83,23 @@ bool test_command_normalization_and_routes() {
         CHECK(route.action == item.action);
     }
 
-    const auto substring = pipeline::route_command("please do not stop now");
-    CHECK(substring.intent == pipeline::RobotIntent::UNKNOWN);
-    CHECK(!substring.has_action);
+    const char* unknown_cases[] = {
+        "Go back load.",
+        "You're on left.",
+        "go",
+        "forward",
+        "turn",
+        "do not stop",
+        "stop now",
+        "",
+        " ;:?!,.",
+    };
+    for (const char* text : unknown_cases) {
+        const auto route = pipeline::route_command(text);
+        CHECK(route.intent == pipeline::RobotIntent::UNKNOWN);
+        CHECK(!route.has_action);
+        CHECK(route.action.empty());
+    }
     return true;
 }
 
@@ -135,7 +159,7 @@ bool test_admission_calls_asr_once_and_routes() {
             count_ok = count == 16000;
             pipeline::AsrResult result;
             result.ok = true;
-            result.text = "Look left!";
+            result.text = "Go forward.";
             result.inference_ms = 12.5;
             return result;
         });
@@ -147,8 +171,31 @@ bool test_admission_calls_asr_once_and_routes() {
     CHECK(count_ok);
     CHECK(json.find("\"admitted\":true") != std::string::npos);
     CHECK(json.find("\"asr_ran\":true") != std::string::npos);
-    CHECK(json.find("\"intent\":\"LOOK_LEFT\"") != std::string::npos);
-    CHECK(json.find("\"action\":\"look_left\"") != std::string::npos);
+    CHECK(json.find("\"intent\":\"GO_FORWARD\"") != std::string::npos);
+    CHECK(json.find("\"action\":\"go_forward\"") != std::string::npos);
+    return true;
+}
+
+bool test_admitted_unknown_transcript_has_null_action() {
+    pipeline::RobotHearingConfig config;
+    config.segmenter.sample_rate = 16000;
+    config.quality_policy = pipeline::QualityPolicy::RULE;
+    pipeline::RobotHearingLoop loop(
+        config,
+        [](const float*, int) {
+            pipeline::AsrResult result;
+            result.ok = true;
+            result.text = "Go back load.";
+            return result;
+        });
+
+    const std::string json =
+        loop.process_completed_utterance(utterance(1, true));
+    CHECK(json.find("\"asr_ran\":true") != std::string::npos);
+    CHECK(json.find("\"transcript\":\"Go back load.\"") !=
+          std::string::npos);
+    CHECK(json.find("\"intent\":\"UNKNOWN\"") != std::string::npos);
+    CHECK(json.find("\"action\":null") != std::string::npos);
     return true;
 }
 
@@ -182,6 +229,8 @@ int main() {
     run("learned_rejection_one_event_zero_asr",
         test_learned_rejection_emits_event_and_skips_asr);
     run("admission_exactly_one_asr", test_admission_calls_asr_once_and_routes);
+    run("admitted_unknown_null_action",
+        test_admitted_unknown_transcript_has_null_action);
     run("asr_failure_valid_event", test_asr_failure_remains_valid_event);
     std::cout << "\n" << passed << " passed, " << failed << " failed\n";
     return failed == 0 ? 0 : 1;

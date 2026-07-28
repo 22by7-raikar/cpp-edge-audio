@@ -7,7 +7,15 @@ namespace pipeline {
 namespace {
 
 bool is_terminal_punctuation(char c) noexcept {
-    return c == '.' || c == ',' || c == '!' || c == '?';
+    return c == '.' || c == ',' || c == '!' || c == '?' || c == ';' ||
+           c == ':';
+}
+
+char ascii_lower(unsigned char byte) noexcept {
+    if (byte >= 'A' && byte <= 'Z') {
+        return static_cast<char>(byte - 'A' + 'a');
+    }
+    return static_cast<char>(byte);
 }
 
 CommandRoute matched(
@@ -39,8 +47,7 @@ std::string normalize_command(std::string_view transcript) {
             normalized.push_back(' ');
             pending_space = false;
         }
-        normalized.push_back(static_cast<char>(
-            byte < 128 ? std::tolower(byte) : byte));
+        normalized.push_back(ascii_lower(byte));
         have_text = true;
     }
 
@@ -56,6 +63,22 @@ std::string normalize_command(std::string_view transcript) {
 
 CommandRoute route_command(std::string_view transcript) {
     std::string normalized = normalize_command(transcript);
+    if (normalized == "go forward") {
+        return matched(
+            RobotIntent::GO_FORWARD, std::move(normalized), "go_forward");
+    }
+    if (normalized == "go backward") {
+        return matched(
+            RobotIntent::GO_BACKWARD, std::move(normalized), "go_backward");
+    }
+    if (normalized == "turn left") {
+        return matched(
+            RobotIntent::TURN_LEFT, std::move(normalized), "turn_left");
+    }
+    if (normalized == "turn right") {
+        return matched(
+            RobotIntent::TURN_RIGHT, std::move(normalized), "turn_right");
+    }
     if (normalized == "look left") {
         return matched(RobotIntent::LOOK_LEFT, std::move(normalized), "look_left");
     }
@@ -80,6 +103,10 @@ CommandRoute route_command(std::string_view transcript) {
 
 const char* robot_intent_str(RobotIntent intent) noexcept {
     switch (intent) {
+        case RobotIntent::GO_FORWARD: return "GO_FORWARD";
+        case RobotIntent::GO_BACKWARD: return "GO_BACKWARD";
+        case RobotIntent::TURN_LEFT:  return "TURN_LEFT";
+        case RobotIntent::TURN_RIGHT: return "TURN_RIGHT";
         case RobotIntent::LOOK_LEFT:  return "LOOK_LEFT";
         case RobotIntent::LOOK_RIGHT: return "LOOK_RIGHT";
         case RobotIntent::STOP:       return "STOP";

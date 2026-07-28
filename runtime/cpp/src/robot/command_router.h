@@ -6,6 +6,10 @@
 namespace pipeline {
 
 enum class RobotIntent {
+    GO_FORWARD,
+    GO_BACKWARD,
+    TURN_LEFT,
+    TURN_RIGHT,
     LOOK_LEFT,
     LOOK_RIGHT,
     STOP,
