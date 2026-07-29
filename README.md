@@ -138,7 +138,7 @@ Write a JSON benchmark/log record with the implemented `--bench-json` option:
 ```bash
 "$BIN" --input "$WAV" --model "$MODEL" \
   --quality-policy learned --quality-threshold 0.3 \
-  --bench-json /tmp/quality-learned.json
+  --bench-json /path/to/private/quality-learned.json
 ```
 
 For all three modes with separate TSV, JSON, stdout, and stderr files:
@@ -151,150 +151,49 @@ The model argument is optional. Without it, the script runs each policy with `--
 
 ## Robot Hearing Loop
 
-`robot_hearing_demo` is the streaming P0 path: raw S16LE stdin is framed and
-resampled, VAD finalizes an utterance, the existing DSP/27-feature analysis
-admits it with rule, learned, or hybrid policy, then Whisper runs zero or one
-time and a deterministic command router emits one JSON event. Learned and
-hybrid inference operate only on completed utterances. The frozen threshold is
-always `0.3`.
+`robot_hearing_demo` converts raw S16LE stdin into completed utterances, applies
+the existing DSP and ordered 27-feature quality analysis, admits each utterance
+with rule, learned, or hybrid policy, runs Whisper zero or one time, routes only
+canonical commands, and emits one robot-facing JSON event. Learned and hybrid
+inference occur only after utterance finalization.
 
-Build the Release executable:
-
-```bash
-cmake -S runtime/cpp -B runtime/cpp/build -DCMAKE_BUILD_TYPE=Release \
-  -DWHISPER_ROOT="$PWD/vendor/whisper.cpp" -DBUILD_TESTS=ON
-cmake --build runtime/cpp/build --target robot_hearing_demo -j"$(nproc)"
-```
-
-Replay a known WAV (JSONL events go to stdout; status and Whisper diagnostics
-go to stderr). Omit `--fast` to replay in real time:
+The presentation-safe path is deterministic replay with
+`ggml-base.en.bin` on CUDA and rule policy. `ggml-tiny.en.bin` is the
+lower-resource fallback. Private command recordings and model binaries remain
+local and are not committed.
 
 ```bash
-scripts/demo_robot_hearing_replay.sh \
-  --input vendor/whisper.cpp/samples/jfk.wav \
-  --demo runtime/cpp/build/robot_hearing_demo \
-  --model vendor/whisper.cpp/models/ggml-tiny.en.bin \
-  --quality-policy rule --fast
+REPO="$(pwd)"
+RULE_FIXTURE="/path/to/private/command-sequence.wav"
+RESULTS_DIR="/path/to/private/results"
+
+"$REPO/scripts/benchmark_robot_hearing_replay.sh" \
+  --input "$RULE_FIXTURE" \
+  --demo "$REPO/runtime/cpp/build/robot_hearing_demo" \
+  --model "$REPO/vendor/whisper.cpp/models/ggml-base.en.bin" \
+  --model-label base.en \
+  --quality-policy rule \
+  --output-dir "$RESULTS_DIR"
 ```
 
-### Reproducible command recordings and GPU model choice
+The supported commands are `stop`, `go forward`, `go backward`, `turn left`,
+and `turn right`. Normalization handles case, surrounding whitespace, repeated
+whitespace, and ordinary terminal punctuation; malformed or noncanonical
+transcripts remain `UNKNOWN` with a null action.
 
-For the GPU-backed live demo, use
-`vendor/whisper.cpp/models/ggml-base.en.bin`. Keep
-`vendor/whisper.cpp/models/ggml-tiny.en.bin` as the lower-memory fallback.
-The model selection remains an explicit script or CLI argument; it is not a
-C++ default.
+iPhone Continuity streaming is experimental. Start with five seconds of silent
+capture, say compound commands continuously without pausing between words, and
+leave about two seconds between commands. Rule policy is recommended for live
+presentation. Learned policy remains available only at the frozen threshold
+`0.3`; it is not calibrated for short live commands and showed variable pilot
+admission.
 
-This recommendation is pilot evidence from 15 commands in three saved iPhone
-Continuity recordings, replayed identically on an RTX 3060 Laptop GPU. It is
-not a statistically conclusive ASR evaluation. Model binaries are local assets
-and are not committed.
+`post_utterance_ms` starts after the segmenter finalizes an utterance. It covers
+completed-utterance processing and is not full microphone-to-action latency.
 
-| Model | Routed commands | Mean ASR | Median ASR | p95 ASR |
-|---|---:|---:|---:|---:|
-| tiny.en | 7/15 | 32.3 ms | 16.0 ms | 115.9 ms |
-| base.en | 12/15 | 40.4 ms | 23.8 ms | 120.7 ms |
-
-Base improved routed-command accuracy substantially with little measured GPU
-latency increase. Codex sandbox executions may not access the NVIDIA device;
-verify CUDA benchmarks from an ordinary Ubuntu terminal.
-
-On a Mac, enumerate AVFoundation devices (the expected FFmpeg device-list
-error is handled by the helper):
-
-```bash
-scripts/record_mac_audio.sh --list-devices
-```
-
-Record an iPhone Continuity microphone WAV after selecting its current audio
-index. The helper records mono 16 kHz signed 16-bit PCM WAV without
-normalization, denoising, or lossy encoding. Press `q`, then Enter, to finish:
-
-```bash
-scripts/record_mac_audio.sh \
-  --device-index 1 \
-  --output "$HOME/robot-hearing-captures/iphone_commands_take1.wav"
-```
-
-Copy an immutable recording to Ubuntu:
-
-```bash
-scp "$HOME/robot-hearing-captures/iphone_commands_take1.wav" \
-  apr@ubuntu-host:/tmp/robot-hearing-p2/
-```
-
-Capture reproducible replay evidence. The runner stores `stdout.jsonl`,
-`stderr.log`, and invocation metadata under the output directory; it validates
-every non-empty stdout line as JSON and does not calculate accuracy without a
-ground-truth manifest:
-
-```bash
-scripts/benchmark_robot_hearing_replay.sh \
-  --input /tmp/robot-hearing-p2/iphone_commands_take1.wav \
-  --demo runtime/cpp/build/robot_hearing_demo \
-  --model vendor/whisper.cpp/models/ggml-tiny.en.bin \
-  --model-label tiny.en --quality-policy rule \
-  --output-dir /tmp/robot-hearing-p2/results
-
-scripts/benchmark_robot_hearing_replay.sh \
-  --input /tmp/robot-hearing-p2/iphone_commands_take1.wav \
-  --demo runtime/cpp/build/robot_hearing_demo \
-  --model vendor/whisper.cpp/models/ggml-base.en.bin \
-  --model-label base.en --quality-policy rule \
-  --output-dir /tmp/robot-hearing-p2/results
-```
-
-Inspect the separate evidence files:
-
-```bash
-cat /tmp/robot-hearing-p2/results/iphone_commands_take1_base.en_rule/stdout.jsonl
-cat /tmp/robot-hearing-p2/results/iphone_commands_take1_base.en_rule/stderr.log
-```
-
-On a Mac, list the supported AVFoundation input devices. FFmpeg normally exits
-nonzero after printing this list; the helper handles that expected exit:
-
-```bash
-scripts/stream_mac_to_ubuntu.sh --list-devices
-```
-
-Stream an explicitly selected MacBook or supported iPhone input to an Ubuntu
-host. Paths for `--remote-demo` and `--remote-model` may be relative to
-`--remote-repo`:
-
-```bash
-scripts/stream_mac_to_ubuntu.sh \
-  --device-index 0 --ssh-destination user@ubuntu-host \
-  --remote-repo /srv/cpp-edge-audio \
-  --remote-demo runtime/cpp/build/robot_hearing_demo \
-  --remote-model vendor/whisper.cpp/models/ggml-base.en.bin \
-  --quality-policy rule --capture-device iphone_16_pro_mic
-```
-
-Use `ggml-tiny.en.bin` in the same command when the lower-memory fallback is
-needed. Rule policy is the reliable live-demo path. Learned policy remains
-available only at its frozen threshold of `0.3`; live-command admission varied
-across the pilot recordings. Scene classification is informational, and
-malformed ASR transcripts remain `UNKNOWN` rather than being mapped to actions.
-
-For an Ubuntu-only fallback with FFmpeg ALSA support:
-
-```bash
-scripts/stream_ubuntu_mic.sh \
-  --demo runtime/cpp/build/robot_hearing_demo \
-  --model vendor/whisper.cpp/models/ggml-tiny.en.bin \
-  --alsa-device default --quality-policy learned \
-  --capture-device ubuntu_mic
-```
-
-Supported robot commands are `stop`, `go forward`, `go backward`, `turn left`,
-and `turn right`; other speech produces `UNKNOWN`. For a command recording,
-leave about two seconds of silence between commands.
-
-Validated real results: direct analyzer parity is 27/27 features; rule-admitted
-JFK invoked Whisper once; learned admitted clean speech 0104 at `0.983` and
-invoked Whisper once; learned rejected JFK at `0.0626` and skipped Whisper.
-Measured CPU ASR latency on those fixtures was about 373–413 ms.
+See the [presentation runbook](docs/robot_hearing_demo.md), [technical
+validation](docs/robot_hearing_validation.md), and [interview
+notes](docs/robot_hearing_interview_notes.md).
 
 ## Limitations
 
@@ -302,8 +201,8 @@ Measured CPU ASR latency on those fixtures was about 373–413 ms.
 - Music and stationary noise remain the largest learned-model false-accept categories.
 - Hybrid is a conservative heuristic, not a separately trained model.
 - Learned inference requires a completed file-level vector; VAD and packed-VAD remain rule-only.
-- Live streaming needs explicit utterance segmentation before learned scoring is valid.
-- No external device, language, or deployment-domain evaluation has been completed.
+- Live learned scoring is valid only after explicit utterance segmentation.
+- The iPhone Continuity work is a small cross-device pilot, not a deployment-domain benchmark.
 - The command router is deterministic, not neural NLU; scene classification is
   informational and can misclassify. There is no calibrated iPhone microphone
   array or DOA claim, and cross-device results are not a production benchmark.
