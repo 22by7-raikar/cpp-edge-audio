@@ -94,6 +94,38 @@ target_include_directories(quality_model_native PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/generated
 )
+
+# -------------------------------------------------------------------
+# Robot hearing completed-utterance core
+# -------------------------------------------------------------------
+add_library(robot_hearing_core STATIC
+    src/audio/audio_io.cpp
+    src/chunker/chunker.cpp
+    src/chunker/vad.cpp
+    src/chunker/streaming_utterance_segmenter.cpp
+    src/gate/features.cpp
+    src/gate/gate.cpp
+    src/gate/quality_aggregator.cpp
+    src/gate/quality_policy.cpp
+    src/scene/scene.cpp
+    src/pipeline/completed_utterance_analyzer.cpp
+    src/robot/command_router.cpp
+    src/robot/robot_event.cpp
+    src/robot/robot_hearing_loop.cpp
+)
+
+target_include_directories(robot_hearing_core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/audio
+    ${WHISPER_ROOT}
+)
+target_link_libraries(robot_hearing_core PUBLIC quality_model_native)
+
+find_library(ROBOT_HEARING_MATH_LIB m)
+if(ROBOT_HEARING_MATH_LIB)
+    target_link_libraries(robot_hearing_core PUBLIC ${ROBOT_HEARING_MATH_LIB})
+endif()
+
 # -------------------------------------------------------------------
 # Pipeline executable
 # -------------------------------------------------------------------
@@ -138,6 +170,29 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(audio_pipeline PRIVATE Threads::Threads)
 
+# -------------------------------------------------------------------
+# Robot hearing stdin demo
+# -------------------------------------------------------------------
+add_executable(robot_hearing_demo
+    src/robot_hearing_main.cpp
+    src/audio/raw_pcm_stream.cpp
+    src/asr/asr.cpp
+)
+
+target_include_directories(robot_hearing_demo PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/audio
+    ${WHISPER_ROOT}
+)
+target_link_libraries(
+    robot_hearing_demo
+    PRIVATE robot_hearing_core whisper Threads::Threads
+)
+
+if(GGML_CUDA)
+    target_compile_definitions(robot_hearing_demo PRIVATE GGML_CUDA=1)
+endif()
+
 message(STATUS "Build type   : ${CMAKE_BUILD_TYPE}")
 message(STATUS "WHISPER_ROOT : ${WHISPER_ROOT}")
 message(STATUS "Install to   : ${CMAKE_INSTALL_PREFIX}")
@@ -157,6 +212,7 @@ if(BUILD_TESTS)
         src/audio/audio_io.cpp
         src/chunker/chunker.cpp
         src/chunker/vad.cpp
+        src/chunker/streaming_utterance_segmenter.cpp
         src/gate/features.cpp
         src/gate/gate.cpp
         src/gate/quality_aggregator.cpp
@@ -239,5 +295,66 @@ if(BUILD_TESTS)
         NAME quality_model_cpp_parity
         COMMAND quality_model_parity
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/quality_model_neura_v1_parity.bin
+    )
+
+    # Bounded S16LE PCM decoder — no external deps beyond the C++ stdlib.
+    add_executable(test_raw_pcm_stream
+        tests/test_raw_pcm_stream.cpp
+        src/audio/raw_pcm_stream.cpp
+    )
+    target_include_directories(test_raw_pcm_stream PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME raw_pcm_stream_unit_tests COMMAND test_raw_pcm_stream)
+
+    # Streaming utterance segmenter — depends only on vad.cpp.
+    add_executable(test_streaming_utterance_segmenter
+        tests/test_streaming_utterance_segmenter.cpp
+        src/chunker/streaming_utterance_segmenter.cpp
+        src/chunker/vad.cpp
+    )
+    target_include_directories(test_streaming_utterance_segmenter PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    find_library(_SEG_MATH_LIB m)
+    if(_SEG_MATH_LIB)
+        target_link_libraries(test_streaming_utterance_segmenter PRIVATE ${_SEG_MATH_LIB})
+    endif()
+    add_test(NAME streaming_utterance_segmenter_unit_tests
+        COMMAND test_streaming_utterance_segmenter)
+
+    add_executable(test_completed_utterance_analyzer
+        tests/test_completed_utterance_analyzer.cpp
+    )
+    target_link_libraries(
+        test_completed_utterance_analyzer PRIVATE robot_hearing_core
+    )
+    add_test(
+        NAME completed_utterance_analyzer_unit_tests
+        COMMAND test_completed_utterance_analyzer
+    )
+
+    add_executable(test_robot_hearing_loop
+        tests/test_robot_hearing_loop.cpp
+    )
+    target_link_libraries(test_robot_hearing_loop PRIVATE robot_hearing_core)
+    add_test(
+        NAME robot_hearing_loop_unit_tests
+        COMMAND test_robot_hearing_loop
+    )
+
+    add_executable(robot_hearing_protocol_driver
+        tests/robot_hearing_protocol_driver.cpp
+    )
+    target_link_libraries(
+        robot_hearing_protocol_driver PRIVATE robot_hearing_core
+    )
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(
+        NAME robot_hearing_stdout_protocol_tests
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_robot_hearing_protocol.py
+            $<TARGET_FILE:robot_hearing_protocol_driver>
+            $<TARGET_FILE:robot_hearing_demo>
     )
 endif()

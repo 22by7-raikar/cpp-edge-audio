@@ -568,6 +568,10 @@ static bool test_logger_tsv_keys() {
 // VAD tests
 // -----------------------------------------------------------------------
 
+static std::vector<float> make_constant_frame(int n, float value) {
+    return std::vector<float>(n, value);
+}
+
 // Build a signal: silence | sine | silence
 static std::vector<float> make_speech_in_silence(
     float pre_sec, float speech_sec, float post_sec,
@@ -582,6 +586,55 @@ static std::vector<float> make_speech_in_silence(
             2.0f * static_cast<float>(M_PI) * freq_hz * i / sr);
     }
     return v;
+}
+
+static bool test_vad_frame_classifier_silence() {
+    const int SR = 16000;
+    pipeline::VadConfig cfg;
+    const int frame_samp = cfg.frame_ms * SR / 1000;
+    const auto frame = make_constant_frame(frame_samp, 0.0f);
+
+    CHECK(!pipeline::vad_frame_is_speech(frame.data(), frame_samp, SR, cfg));
+    return true;
+}
+
+static bool test_vad_frame_classifier_speech_like() {
+    const int SR = 16000;
+    pipeline::VadConfig cfg;
+    const int frame_samp = cfg.frame_ms * SR / 1000;
+    std::vector<float> frame(frame_samp);
+    for (int i = 0; i < frame_samp; ++i) {
+        frame[static_cast<size_t>(i)] = 0.2f * std::sin(
+            2.0f * static_cast<float>(M_PI) * 200.0f * i / SR);
+    }
+
+    CHECK(pipeline::vad_frame_is_speech(frame.data(), frame_samp, SR, cfg));
+    return true;
+}
+
+static bool test_vad_frame_classifier_excessive_zcr() {
+    const int SR = 16000;
+    pipeline::VadConfig cfg;
+    const int frame_samp = cfg.frame_ms * SR / 1000;
+    std::vector<float> frame(frame_samp);
+    for (int i = 0; i < frame_samp; ++i) {
+        frame[static_cast<size_t>(i)] = (i % 2 == 0) ? 0.1f : -0.1f;
+    }
+
+    CHECK(!pipeline::vad_frame_is_speech(frame.data(), frame_samp, SR, cfg));
+    return true;
+}
+
+static bool test_vad_run_vad_regression() {
+    const int SR = 16000;
+    const auto sig = make_speech_in_silence(0.5f, 1.0f, 0.5f, 200.0f, 0.2f, SR);
+    const auto segs = pipeline::run_vad(sig.data(), static_cast<int>(sig.size()), SR);
+
+    CHECK(segs.size() == 1u);
+    CHECK(segs[0].start_sec < 0.6);
+    CHECK(segs[0].end_sec > 1.3);
+    CHECK(segs[0].duration_sec() > 0.9);
+    return true;
 }
 
 // All silence → no segments
@@ -687,6 +740,10 @@ int main() {
     run("logger_tsv_keys",        test_logger_tsv_keys);
 
     // VAD
+    run("vad_frame_classifier_silence",   test_vad_frame_classifier_silence);
+    run("vad_frame_classifier_speech",    test_vad_frame_classifier_speech_like);
+    run("vad_frame_classifier_high_zcr",  test_vad_frame_classifier_excessive_zcr);
+    run("vad_run_vad_regression",         test_vad_run_vad_regression);
     run("vad_all_silence",        test_vad_all_silence);
     run("vad_speech_in_silence",  test_vad_speech_in_silence);
     run("vad_short_burst_filtered", test_vad_short_burst_filtered);
