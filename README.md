@@ -177,6 +177,80 @@ scripts/demo_robot_hearing_replay.sh \
   --quality-policy rule --fast
 ```
 
+### Reproducible command recordings and GPU model choice
+
+For the GPU-backed live demo, use
+`vendor/whisper.cpp/models/ggml-base.en.bin`. Keep
+`vendor/whisper.cpp/models/ggml-tiny.en.bin` as the lower-memory fallback.
+The model selection remains an explicit script or CLI argument; it is not a
+C++ default.
+
+This recommendation is pilot evidence from 15 commands in three saved iPhone
+Continuity recordings, replayed identically on an RTX 3060 Laptop GPU. It is
+not a statistically conclusive ASR evaluation. Model binaries are local assets
+and are not committed.
+
+| Model | Routed commands | Mean ASR | Median ASR | p95 ASR |
+|---|---:|---:|---:|---:|
+| tiny.en | 7/15 | 32.3 ms | 16.0 ms | 115.9 ms |
+| base.en | 12/15 | 40.4 ms | 23.8 ms | 120.7 ms |
+
+Base improved routed-command accuracy substantially with little measured GPU
+latency increase. Codex sandbox executions may not access the NVIDIA device;
+verify CUDA benchmarks from an ordinary Ubuntu terminal.
+
+On a Mac, enumerate AVFoundation devices (the expected FFmpeg device-list
+error is handled by the helper):
+
+```bash
+scripts/record_mac_audio.sh --list-devices
+```
+
+Record an iPhone Continuity microphone WAV after selecting its current audio
+index. The helper records mono 16 kHz signed 16-bit PCM WAV without
+normalization, denoising, or lossy encoding. Press `q`, then Enter, to finish:
+
+```bash
+scripts/record_mac_audio.sh \
+  --device-index 1 \
+  --output "$HOME/robot-hearing-captures/iphone_commands_take1.wav"
+```
+
+Copy an immutable recording to Ubuntu:
+
+```bash
+scp "$HOME/robot-hearing-captures/iphone_commands_take1.wav" \
+  apr@ubuntu-host:/tmp/robot-hearing-p2/
+```
+
+Capture reproducible replay evidence. The runner stores `stdout.jsonl`,
+`stderr.log`, and invocation metadata under the output directory; it validates
+every non-empty stdout line as JSON and does not calculate accuracy without a
+ground-truth manifest:
+
+```bash
+scripts/benchmark_robot_hearing_replay.sh \
+  --input /tmp/robot-hearing-p2/iphone_commands_take1.wav \
+  --demo runtime/cpp/build/robot_hearing_demo \
+  --model vendor/whisper.cpp/models/ggml-tiny.en.bin \
+  --model-label tiny.en --quality-policy rule \
+  --output-dir /tmp/robot-hearing-p2/results
+
+scripts/benchmark_robot_hearing_replay.sh \
+  --input /tmp/robot-hearing-p2/iphone_commands_take1.wav \
+  --demo runtime/cpp/build/robot_hearing_demo \
+  --model vendor/whisper.cpp/models/ggml-base.en.bin \
+  --model-label base.en --quality-policy rule \
+  --output-dir /tmp/robot-hearing-p2/results
+```
+
+Inspect the separate evidence files:
+
+```bash
+cat /tmp/robot-hearing-p2/results/iphone_commands_take1_base.en_rule/stdout.jsonl
+cat /tmp/robot-hearing-p2/results/iphone_commands_take1_base.en_rule/stderr.log
+```
+
 On a Mac, list the supported AVFoundation input devices. FFmpeg normally exits
 nonzero after printing this list; the helper handles that expected exit:
 
@@ -193,9 +267,15 @@ scripts/stream_mac_to_ubuntu.sh \
   --device-index 0 --ssh-destination user@ubuntu-host \
   --remote-repo /srv/cpp-edge-audio \
   --remote-demo runtime/cpp/build/robot_hearing_demo \
-  --remote-model vendor/whisper.cpp/models/ggml-tiny.en.bin \
-  --quality-policy learned --capture-device macbook_mic
+  --remote-model vendor/whisper.cpp/models/ggml-base.en.bin \
+  --quality-policy rule --capture-device iphone_16_pro_mic
 ```
+
+Use `ggml-tiny.en.bin` in the same command when the lower-memory fallback is
+needed. Rule policy is the reliable live-demo path. Learned policy remains
+available only at its frozen threshold of `0.3`; live-command admission varied
+across the pilot recordings. Scene classification is informational, and
+malformed ASR transcripts remain `UNKNOWN` rather than being mapped to actions.
 
 For an Ubuntu-only fallback with FFmpeg ALSA support:
 
@@ -207,11 +287,9 @@ scripts/stream_ubuntu_mic.sh \
   --capture-device ubuntu_mic
 ```
 
-Supported router commands are `look left`, `look right`, `stop`, `come here`,
-and `cancel`; other speech produces `UNKNOWN`. For a later genuine command
-recording, use: two seconds silence; `look left`; two seconds silence; `look
-right`; two seconds silence; `stop`; two seconds silence; `come here`; two
-seconds silence; `cancel`; two seconds silence.
+Supported robot commands are `stop`, `go forward`, `go backward`, `turn left`,
+and `turn right`; other speech produces `UNKNOWN`. For a command recording,
+leave about two seconds of silence between commands.
 
 Validated real results: direct analyzer parity is 27/27 features; rule-admitted
 JFK invoked Whisper once; learned admitted clean speech 0104 at `0.983` and
