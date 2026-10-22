@@ -1,210 +1,157 @@
-# C++ Edge Audio Quality Gate
+# edge_audio
 
-Linux-first C++/Python audio-admission pipeline around [whisper.cpp](vendor/whisper.cpp). It measures audio quality before ASR so low-value audio does not consume Whisper compute. The runtime combines an interpretable DSP gate with a native export of a trained gradient-boosting quality model; Python is used for dataset, training, and offline evaluation tooling only.
+[![ci](https://github.com/22by7-raikar/cpp-edge-audio/actions/workflows/ci.yml/badge.svg)](https://github.com/22by7-raikar/cpp-edge-audio/actions/workflows/ci.yml)
+
+A C++17 runtime for on-device speech recognition that **decides whether audio
+is worth transcribing before spending ASR compute on it**, plus a streaming
+voice-command loop built on the same decision. ASR is
+[whisper.cpp](https://github.com/ggerganov/whisper.cpp) on CPU or CUDA.
+
+On an edge device a Whisper call costs hundreds of milliseconds, while the
+admission decision here costs microseconds. Music, noise, silence and clipped
+audio are rejected first, using DSP features and a gradient-boosted model
+trained in Python and compiled into the binary.
+
+## Results
+
+| | |
+|---|---|
+| Admission quality, held-out test (1,700 files) | learned F1 **0.920** vs rule gate 0.807; recall 98.6% |
+| ASR calls avoided vs transcribing everything | **32.8%** learned · 37.0% hybrid |
+| Native model vs scikit-learn | **3,400 / 3,400** identical decisions, max probability error 1.1e-16 |
+| Learned model cost | ~1 µs per decision, 36 KB of `constexpr` data, no allocation |
+| Streaming buffers | bounded by the 8 s utterance cap (~0.5 MB), independent of stream length |
+
+Evaluation protocol, splits, leakage checks and caveats:
+[docs/quality_model.md](docs/quality_model.md).
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    WAV[WAV input] --> RESAMPLE[16 kHz resampling]
-    RESAMPLE --> CHUNKS[Non-overlapping 5 s DSP analysis]
-    CHUNKS --> METRICS[12 chunk metrics + gate result]
-    METRICS --> AGG[File-level 27-feature aggregation]
-    METRICS --> RULE[Rule policy]
-    AGG --> LEARNED[Native learned quality model]
-    RULE --> POLICY{rule / learned / hybrid}
-    LEARNED --> POLICY
-    POLICY -->|admit| ASR[whisper.cpp]
-    POLICY -->|reject| LOGS[Structured TSV / JSON logs]
-    ASR --> LOGS
-```
+![System overview](docs/diagrams/system_overview.svg)
 
-The learned model scores one completed WAV, not individual chunks. Rule policy is the default. Learned and hybrid policies run Whisper zero or one time per complete WAV after the file-level decision.
+- **`audio_pipeline`**: offline. Admits a complete WAV under a `rule`,
+  `learned` or `hybrid` policy, optionally transcribes it, and emits
+  per-window records plus a JSON report.
+- **`voice_command_stream`**: streaming. Reads raw PCM on stdin, endpoints
+  utterances, admits each one, transcribes it at most once, and writes one
+  JSON command event per utterance.
 
-## Engineering milestones
+Both are thin wrappers over `edge_audio_core`, a dependency-free library
+(audio I/O, segmentation, quality admission, command routing, reporting). Only
+`edge_audio_asr` links whisper.cpp. Design, contracts and trade-offs are in
+[docs/architecture.md](docs/architecture.md); the API reference is generated
+with Doxygen.
 
-- Baseline interpretable DSP rule gate with FFT-derived chunk metrics.
-- Dataset and evaluation audit, including leakage and threshold-metadata correction.
-- Disjoint train/validation/test protocol with threshold selection on validation only.
-- `sklearn.ensemble.GradientBoostingClassifier` training on one complete-file 27-feature vector.
-- Deterministic, dependency-free C++ tree export.
-- Python/C++ numerical parity verification.
-- Runtime file-level learned and hybrid admission integration.
-
-## Verified results
-
-Frozen held-out feature-table evaluation, 1,700 examples. ASR calls mean one file-level call per admitted example; Whisper was not run for this table evaluation.
-
-| Policy | TP | FP | TN | FN | F1 | ASR calls | Calls avoided |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| Rule baseline | 957 | 416 | 284 | 43 | 0.8066 | 1,373 | 19.24% |
-| Learned | 986 | 157 | 543 | 14 | 0.9202 | 1,143 | 32.76% |
-| Hybrid heuristic | 944 | 127 | 573 | 56 | 0.9116 | 1,071 | 37.00% |
-
-![Policy comparison: held-out F1 and ASR calls avoided](docs/assets/quality_policy_comparison.svg)
-
-Native export/parity results:
-
-- 100 depth-3 trees, 1,488 nodes, 27 ordered features.
-- 3,400/3,400 Python/C++ decision agreement.
-- Maximum raw-score difference: 0.
-- Maximum probability difference: `1.1102230246251565e-16`.
-- Compiled model data: 36,112 bytes.
-- Recorded export benchmark: about 1.21 million predictions/second.
-
-Runtime measurements on the integration build:
-
-- Aggregation: 43.7 ns/chunk.
-- Native model: 0.894 microseconds mean, 0.902 microseconds p95.
-- Whole-file Whisper smoke: about 417–439 ms.
-
-These are three distinct scopes: the frozen table above, a 1,300-WAV native runtime subset, and a real Whisper smoke test. The native subset excludes 400 FLAC inputs because the current runtime accepts WAV. See [runtime integration results](reports/quality_gate_runtime_integration.md) for the full distinction and limitations.
-
-## Setup
-
-The environment defined by environment.yml is named audio_king.
+## Quick start
 
 ```bash
-conda activate audio_king
-git submodule update --init
+git clone --recursive https://github.com/22by7-raikar/cpp-edge-audio.git
+cd cpp-edge-audio
+cmake --preset release && cmake --build --preset release -j
+ctest --preset release                  # 100 tests, no model weights needed
+scripts/download_model.sh base.en       # -> models/ggml-base.en.bin
 ```
 
-The runtime is C++17/CMake and expects `vendor/whisper.cpp`. CPU is the default:
+**Offline admission and transcription**
 
 ```bash
-cmake -S runtime/cpp -B runtime/cpp/build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DWHISPER_ROOT="$PWD/vendor/whisper.cpp" \
-  -DBUILD_TESTS=ON
-cmake --build runtime/cpp/build -j"$(nproc)"
+build/release/apps/audio_pipeline --input vendor/whisper.cpp/samples/jfk.wav \
+    --model models/ggml-base.en.bin --policy learned --report jfk.json
 ```
 
-For an optional CUDA build, configure the same supported CMake project with `-DGGML_CUDA=ON`:
+Omit `--model` to analyse without transcribing. `scripts/compare_policies.sh`
+runs one file through all three policies.
+
+**Streaming voice commands**
 
 ```bash
-cmake -S runtime/cpp -B runtime/cpp/build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DWHISPER_ROOT="$PWD/vendor/whisper.cpp" \
-  -DGGML_CUDA=ON
-cmake --build runtime/cpp/build -j"$(nproc)"
+scripts/voice_commands.sh --model models/ggml-base.en.bin --mic          # live (ALSA)
+scripts/voice_commands.sh --model models/ggml-base.en.bin --wav cmds.wav  # replay
 ```
 
-## Build and test
+One event per utterance (abridged; full schema in
+[architecture.md](docs/architecture.md#voice-commands-command)):
 
-The repository test script configures `runtime/cpp/build_tests`, builds the native targets, and runs CTest:
-
-```bash
-bash scripts/run_tests.sh Release
+```json
+{"event":"voice_command","utterance_id":1,"duration_ms":1120,"finalization_reason":"end_silence",
+ "quality_policy":"rule","admitted":true,"rejection_reason":"","asr_ran":true,
+ "transcript":"Look left!","intent":"LOOK_LEFT","action":"look_left",
+ "latency":{"quality_us":...,"asr_ms":...,"post_utterance_ms":...},"stream":{"frames_processed":85}}
 ```
 
-To run the supported Python workflow test:
+Requirements: CMake ≥ 3.21, a C++17 compiler (CI: GCC 13 on Ubuntu 24.04), Python 3
+for the protocol test, ffmpeg for the helper scripts, and the CUDA toolkit for
+`--preset cuda`.
 
-```bash
-conda activate audio_king
-python -m pytest tests/python/test_quality_workflow.py -v
+## Command-line reference
+
+| `audio_pipeline` | |
+|---|---|
+| `--input <wav>` | Required. Any rate and channel count; resampled to 16 kHz mono. |
+| `--model <path>` | whisper.cpp model. Omit to analyse only. |
+| `--policy rule\|learned\|hybrid` | Admission policy (default `rule`). |
+| `--threshold <p>` | Learned threshold in [0, 1] (default 0.3, chosen on validation). |
+| `--segmentation fixed\|vad\|vad-packed` | Windowing (default `fixed`, 5 s). Learned policies require `fixed`. |
+| `--no-gate`, `--no-adapt` | Disable the rule gate / scene-adaptive control. |
+| `--report <json>` | Also write a JSON report. |
+
+| `voice_command_stream` | |
+|---|---|
+| `--rate <hz> --channels <1\|2>` | Required. Format of S16LE PCM on stdin. |
+| `--model <path>` | Required. whisper.cpp model. |
+| `--policy`, `--threshold` | As above (default `rule`). |
+| `--capture-device`, `--transport` | Labels copied into every event. |
+
+Exit status: 0 on success, 2 for invalid arguments (before any model loads),
+1 for runtime failures.
+
+## Repository layout
+
+```
+src/edge_audio/   audio · segmentation · quality · asr · command · report
+apps/             audio_pipeline, voice_command_stream, evaluate_policies, benchmark_quality
+tests/            GoogleTest suite, stream protocol test, model parity corpus
+tools/python/     DSP feature mirror, training, export, policy evaluation
+scripts/          dataset preparation, model download, demos
+artifacts/        the trained quality model (quality_model_v1) and its evaluation
+docs/             architecture, quality model, diagrams, Doxyfile
 ```
 
-Focused native checks after the test build:
+## Development
 
-```bash
-runtime/cpp/build_tests/test_quality_gate_runtime
-runtime/cpp/build_tests/quality_model_parity \
-  runtime/cpp/tests/data/quality_model_neura_v1_parity.bin
-```
+| Task | Command |
+|---|---|
+| Debug build + tests | `cmake --preset debug && cmake --build --preset debug && ctest --preset debug` |
+| AddressSanitizer + UBSan | `cmake --preset asan && cmake --build --preset asan && ctest --preset asan` |
+| CUDA build | `cmake --preset cuda && cmake --build --preset cuda` |
+| Python tests | `python -m pytest tests/python` |
+| API docs | `doxygen docs/Doxyfile` → `docs/api/html/index.html` |
+| Diagrams | `docs/diagrams/render.sh` (Mermaid sources → SVG) |
+| Format | `clang-format -i $(git ls-files 'src/*.h' 'src/*.cpp' 'apps/*.cpp' 'tests/*.cpp')` |
+| Model latency | `build/release/apps/benchmark_quality` |
 
-## Demo
+Presets build with `-Wall -Wextra -Wpedantic -Wshadow -Werror`. CI runs the
+Release and sanitizer suites, the Python tests, a check that the parity corpus
+is reproducible from the committed artifact, and clang-format.
 
-The included JFK fixture and local tiny English Whisper model make a self-contained demo when the submodule models are present:
-
-```bash
-WAV=vendor/whisper.cpp/samples/jfk.wav
-MODEL=vendor/whisper.cpp/models/ggml-tiny.en.bin
-BIN=runtime/cpp/build/audio_pipeline
-
-"$BIN" --input "$WAV" --model "$MODEL" --quality-policy rule
-"$BIN" --input "$WAV" --model "$MODEL" --quality-policy learned --quality-threshold 0.3
-"$BIN" --input "$WAV" --model "$MODEL" --quality-policy hybrid --quality-threshold 0.3
-```
-
-The alternate threshold below is a CLI demonstration only; `0.3` remains the frozen validation-selected threshold.
-
-```bash
-"$BIN" --input "$WAV" --model "$MODEL" \
-  --quality-policy learned --quality-threshold 0
-```
-
-Write a JSON benchmark/log record with the implemented `--bench-json` option:
-
-```bash
-"$BIN" --input "$WAV" --model "$MODEL" \
-  --quality-policy learned --quality-threshold 0.3 \
-  --bench-json /path/to/private/quality-learned.json
-```
-
-For all three modes with separate TSV, JSON, stdout, and stderr files:
-
-```bash
-scripts/demo_quality_gate.sh "$WAV" "$MODEL"
-```
-
-The model argument is optional. Without it, the script runs each policy with `--gate-only`, preserving gate/logging demonstration while cleanly skipping real ASR.
-
-## Robot Hearing Loop
-
-`robot_hearing_demo` converts raw S16LE stdin into completed utterances, applies
-the existing DSP and ordered 27-feature quality analysis, admits each utterance
-with rule, learned, or hybrid policy, runs Whisper zero or one time, routes only
-canonical commands, and emits one robot-facing JSON event. Learned and hybrid
-inference occur only after utterance finalization.
-
-The presentation-safe path is deterministic replay with
-`ggml-base.en.bin` on CUDA and rule policy. `ggml-tiny.en.bin` is the
-lower-resource fallback. Private command recordings and model binaries remain
-local and are not committed.
-
-```bash
-REPO="$(pwd)"
-RULE_FIXTURE="/path/to/private/command-sequence.wav"
-RESULTS_DIR="/path/to/private/results"
-
-"$REPO/scripts/benchmark_robot_hearing_replay.sh" \
-  --input "$RULE_FIXTURE" \
-  --demo "$REPO/runtime/cpp/build/robot_hearing_demo" \
-  --model "$REPO/vendor/whisper.cpp/models/ggml-base.en.bin" \
-  --model-label base.en \
-  --quality-policy rule \
-  --output-dir "$RESULTS_DIR"
-```
-
-The supported commands are `stop`, `go forward`, `go backward`, `turn left`,
-and `turn right`. Normalization handles case, surrounding whitespace, repeated
-whitespace, and ordinary terminal punctuation; malformed or noncanonical
-transcripts remain `UNKNOWN` with a null action.
-
-iPhone Continuity streaming is experimental. Start with five seconds of silent
-capture, say compound commands continuously without pausing between words, and
-leave about two seconds between commands. Rule policy is recommended for live
-presentation. Learned policy remains available only at the frozen threshold
-`0.3`; it is not calibrated for short live commands and showed variable pilot
-admission.
-
-`post_utterance_ms` starts after the segmenter finalizes an utterance. It covers
-completed-utterance processing and is not full microphone-to-action latency.
-
-See the [presentation runbook](docs/robot_hearing_demo.md), [technical
-validation](docs/robot_hearing_validation.md), and [interview
-notes](docs/robot_hearing_interview_notes.md).
+Changing the model: retrain, then run
+`python tools/python/export/export_quality_model.py`. This regenerates
+`quality_model_data.h` and the parity corpus together, so the parity test
+fails if the C++ and Python sides ever diverge.
 
 ## Limitations
 
-- The evaluation data is class-balanced and substantially synthetic; metrics do not estimate production prevalence.
-- Music and stationary noise remain the largest learned-model false-accept categories.
-- Hybrid is a conservative heuristic, not a separately trained model.
-- Learned inference requires a completed file-level vector; VAD and packed-VAD remain rule-only.
-- Live learned scoring is valid only after explicit utterance segmentation.
-- The iPhone Continuity work is a small cross-device pilot, not a deployment-domain benchmark.
-- The command router is deterministic, not neural NLU; scene classification is
-  informational and can misclassify. There is no calibrated iPhone microphone
-  array or DOA claim, and cross-device results are not a production benchmark.
+- The learned model is trained on class-balanced, largely synthetic data. Its
+  error rates are not field estimates, and music and stationary noise cause
+  all of its false accepts.
+- Probabilities are not calibrated for 1–2 s commands. Use `rule` for
+  streaming until the model is recalibrated on command-length audio.
+- The frame VAD is energy/ZCR based, and the streaming loop is
+  single-threaded: ASR runs synchronously between pushes.
+- Command routing is exact-match over nine phrases, by design. A
+  mis-transcription yields `UNKNOWN`, never a different command.
 
-See [quality model protocol](reports/quality_model_neura_v1.md), [native parity](reports/quality_model_cpp_parity.md), and [runtime integration](reports/quality_gate_runtime_integration.md) for reproducibility details.
+## License
+
+MIT. See [LICENSE](LICENSE). whisper.cpp (MIT) is a git submodule, and dr_wav
+(public domain / MIT-0) is vendored in `third_party/`.

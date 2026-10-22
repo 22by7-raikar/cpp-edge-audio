@@ -17,7 +17,7 @@ import numpy as np
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-ARTIFACT_DIR = REPO_ROOT / "artifacts" / "quality_model_neura_v1"
+ARTIFACT_DIR = REPO_ROOT / "artifacts" / "quality_model_v1"
 
 
 def sha256(path: Path) -> str:

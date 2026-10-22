@@ -1,0 +1,44 @@
+%% Build targets and allowed dependencies. Arrows point at what is depended on.
+flowchart TB
+    subgraph apps[apps/]
+        ap[audio_pipeline]
+        vs[voice_command_stream]
+        ev[evaluate_policies]
+        bq[benchmark_quality]
+    end
+    subgraph tests_[tests/]
+        ut[edge_audio_tests<br/>GoogleTest]
+        sp[stream_protocol<br/>driver + Python check]
+    end
+    asr[edge_audio_asr<br/>asr/asr_engine]
+    subgraph core[edge_audio_core]
+        direction LR
+        cmd[command] --> q[quality]
+        cmd --> seg[segmentation]
+        q --> seg
+        q --> au[audio]
+        seg --> au
+        rep[report] --> q
+        q -. Transcriber interface .-> tr[asr/transcription.h]
+    end
+    whisper[[whisper.cpp]]
+    drwav[[dr_wav]]
+    gtest[[GoogleTest]]
+
+    ap --> asr
+    vs --> asr
+    ev --> core
+    bq --> core
+    ut --> core
+    sp --> core
+    asr --> core
+    asr --> whisper
+    au --> drwav
+    ut --> gtest
+
+    classDef ext fill:#f4f4f5,stroke:#71717a,color:#18181b
+    classDef app fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    classDef lib fill:#dcfce7,stroke:#16a34a,color:#14532d
+    class whisper,drwav,gtest ext
+    class ap,vs,ev,bq,ut,sp app
+    class asr,cmd,q,seg,au,rep,tr lib

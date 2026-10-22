@@ -1,0 +1,31 @@
+%% voice_command_stream: everything runs on one thread, per pushed block.
+sequenceDiagram
+    autonumber
+    participant In as stdin (S16LE)
+    participant Dec as RawPcmDecoder
+    participant VCL as VoiceCommandLoop
+    participant Seg as StreamingUtteranceSegmenter
+    participant QA as UtteranceAnalyzer
+    participant ASR as Transcriber (AsrEngine)
+    participant Out as stdout (JSON Lines)
+
+    loop until EOF
+        In->>Dec: bytes
+        Dec->>VCL: up to 512 mono samples
+        VCL->>Seg: push(samples)
+        Note over Seg: 20 ms frames → VAD →<br/>IDLE / SPEECH / ENDING
+        opt utterance closed
+            Seg-->>VCL: Utterance (pre-roll + speech + tail)
+            VCL->>QA: analyze(utterance, policy, threshold)
+            QA-->>VCL: admission, scene, learned probability
+            alt admitted
+                VCL->>ASR: transcribe(whole utterance) — exactly once
+                ASR-->>VCL: text
+                VCL->>VCL: route_command(text)
+            else rejected
+                Note over VCL: no ASR call
+            end
+            VCL->>Out: one VoiceCommandEvent per utterance
+        end
+    end
+    In->>VCL: EOF, then flush() closes any active utterance

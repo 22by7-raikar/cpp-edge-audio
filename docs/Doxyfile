@@ -1,0 +1,43 @@
+# Doxygen configuration. Run from the repository root:
+#   doxygen docs/Doxyfile        -> docs/api/html/index.html
+PROJECT_NAME           = "edge_audio"
+PROJECT_BRIEF          = "Speech admission and voice commands for on-device ASR"
+OUTPUT_DIRECTORY       = docs/api
+INPUT                  = README.md \
+                         docs/architecture.md \
+                         docs/quality_model.md \
+                         src/edge_audio
+EXCLUDE                = src/edge_audio/quality/quality_model_data.h
+FILE_PATTERNS          = *.h *.md
+RECURSIVE              = YES
+USE_MDFILE_AS_MAINPAGE = README.md
+IMAGE_PATH             = docs/diagrams
+STRIP_FROM_PATH        = src
+STRIP_FROM_INC_PATH    = src
+FULL_PATH_NAMES        = YES
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = NO
+HIDE_UNDOC_MEMBERS     = NO
+JAVADOC_AUTOBRIEF      = YES
+MARKDOWN_SUPPORT       = YES
+TOC_INCLUDE_HEADINGS   = 3
+SORT_MEMBER_DOCS       = NO
+GROUP_NESTED_COMPOUNDS = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_NO_PARAMDOC       = NO
+WARN_AS_ERROR          = FAIL_ON_WARNINGS
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_TREEVIEW      = YES
+HTML_COLORSTYLE        = TOGGLE
+HAVE_DOT               = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = NO
+INCLUDE_GRAPH          = YES
+INCLUDED_BY_GRAPH      = YES
+GROUP_GRAPHS           = YES
+DIRECTORY_GRAPH        = YES
+QUIET                  = YES

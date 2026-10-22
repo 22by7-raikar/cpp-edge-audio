@@ -1,30 +1,44 @@
 #!/usr/bin/env python3
-"""Export the authoritative sklearn quality GBT and its parity corpus."""
+"""Export the trained quality model to C++ and build the native parity corpus.
+
+Two outputs, generated independently:
+
+header  src/edge_audio/quality/quality_model_data.h
+        The scikit-learn GradientBoostingClassifier as constexpr C++ tables.
+        Requires the exact scikit-learn version recorded in the artifact metadata,
+        because the joblib pickle is version-specific.
+
+corpus  tests/data/quality_model_v1_parity.bin
+        Every validation and test feature vector with the probability that
+        scikit-learn produced at training time (recorded in *_predictions.csv).
+        Needs only NumPy. The C++ test suite scores each vector natively and
+        requires identical decisions and probabilities within 1e-12.
+
+Usage:
+    python tools/python/export/export_quality_model.py              # both
+    python tools/python/export/export_quality_model.py --corpus-only
+"""
 
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import math
 import struct
 from pathlib import Path
 
-import joblib
 import numpy as np
-import sklearn
-from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.dummy import DummyClassifier
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_ARTIFACT_DIR = REPO_ROOT / "artifacts/quality_model_neura_v1"
-DEFAULT_HEADER = REPO_ROOT / "runtime/cpp/generated/quality_model_neura_v1.h"
-DEFAULT_CORPUS = (
-    REPO_ROOT / "runtime/cpp/tests/data/quality_model_neura_v1_parity.bin"
-)
-CORPUS_MAGIC = b"QMPAR1\0\0"
-CORPUS_VERSION = 1
+DEFAULT_ARTIFACT_DIR = REPO_ROOT / "artifacts/quality_model_v1"
+DEFAULT_HEADER = REPO_ROOT / "src/edge_audio/quality/quality_model_data.h"
+DEFAULT_CORPUS = REPO_ROOT / "tests/data/quality_model_v1_parity.bin"
+CORPUS_MAGIC = b"QMPAR2\0\0"
+CORPUS_VERSION = 2
+PARITY_SPLITS = ("validation", "test")
 
 
 def _sha256(path: Path) -> str:
@@ -54,6 +68,11 @@ def _portable(path: Path) -> str:
 
 
 def _load_authoritative(artifact_dir: Path):
+    import joblib
+    import sklearn
+    from sklearn.dummy import DummyClassifier
+    from sklearn.ensemble import GradientBoostingClassifier
+
     required = [
         "quality_gbt.joblib",
         "feature_schema.json",
@@ -156,6 +175,7 @@ def _load_authoritative(artifact_dir: Path):
         "initial_raw_score": float(initial[0]),
         "model_hash": model_hash,
         "metadata_hash": _sha256(artifact_dir / "model_metadata.json"),
+        "sklearn_version": sklearn.__version__,
     }
 
 
@@ -195,14 +215,14 @@ def _render_header(model) -> str:
         "#include <cstddef>",
         "#include <string_view>",
         "",
-        '#include "gate/quality_model.h"',
+        '#include "edge_audio/quality/quality_model.h"',
         "",
-        "namespace pipeline::quality_model_generated {",
+        "namespace edge_audio::quality_model_generated {",
         "",
         f"inline constexpr std::string_view kSchemaVersion = {json.dumps(model['schema']['schema_version'])};",
         f"inline constexpr std::string_view kModelSha256 = {json.dumps(model['model_hash'])};",
         f"inline constexpr std::string_view kMetadataSha256 = {json.dumps(model['metadata_hash'])};",
-        f"inline constexpr std::string_view kSklearnVersion = {json.dumps(sklearn.__version__)};",
+        f"inline constexpr std::string_view kSklearnVersion = {json.dumps(model['sklearn_version'])};",
         f"inline constexpr std::string_view kSourceRunTimestamp = {json.dumps(source_timestamp)};",
         f"inline constexpr double kLearningRate = {_cpp_double(clf.learning_rate)};",
         f"inline constexpr double kInitialRawScore = {_cpp_double(model['initial_raw_score'])};",
@@ -222,17 +242,34 @@ def _render_header(model) -> str:
         *node_lines,
         "}};",
         "",
-        "}  // namespace pipeline::quality_model_generated",
+        "}  // namespace edge_audio::quality_model_generated",
         "",
     ])
 
 
-def _load_parity_split(artifact_dir: Path, split: str, feature_names: list[str]):
+def _verify_sklearn_formula(artifact_dir: Path, model) -> None:
+    """Check that the exported formula (init + lr * sum(trees), then logistic)
+    reproduces scikit-learn exactly on every held-out vector."""
+    clf = model["clf"]
+    for split in PARITY_SPLITS:
+        X, _ = _load_split_features(artifact_dir, split, model["feature_names"])
+        raw = np.asarray(clf.decision_function(X), dtype=np.float64)
+        manual = np.full(len(X), model["initial_raw_score"], dtype=np.float64)
+        for estimator in clf.estimators_[:, 0]:
+            manual += clf.learning_rate * estimator.predict(X).reshape(-1)
+        if not np.array_equal(raw, manual):
+            raise RuntimeError(f"{split}: tree-sum formula differs from decision_function")
+        probabilities = np.asarray(clf.predict_proba(X)[:, 1], dtype=np.float64)
+        if not np.array_equal(probabilities, 1.0 / (1.0 + np.exp(-raw))):
+            raise RuntimeError(f"{split}: logistic link differs from predict_proba")
+
+
+def _load_split_features(artifact_dir: Path, split: str, feature_names: list[str]):
     with np.load(artifact_dir / f"{split}_features.npz") as table:
         X = np.asarray(table["X"], dtype=np.float32)
         ids = table["stable_example_ids"].astype(str)
         names = table["feature_names"].astype(str).tolist()
-    if X.shape != (1700, 27):
+    if X.ndim != 2 or X.shape[1] != 27:
         raise RuntimeError(f"unexpected {split} feature shape: {X.shape}")
     if names != feature_names:
         raise RuntimeError(f"{split} feature order differs from model schema")
@@ -243,87 +280,83 @@ def _load_parity_split(artifact_dir: Path, split: str, feature_names: list[str])
     return X, ids
 
 
-def _render_corpus(artifact_dir: Path, model) -> bytes:
-    clf = model["clf"]
-    validation_X, validation_ids = _load_parity_split(
-        artifact_dir, "validation", model["feature_names"]
-    )
-    test_X, test_ids = _load_parity_split(
-        artifact_dir, "test", model["feature_names"]
-    )
-    X = np.concatenate([validation_X, test_X], axis=0)
-    ids = np.concatenate([validation_ids, test_ids], axis=0)
-    if len(set(ids.tolist())) != len(ids):
-        raise RuntimeError("stable IDs overlap across validation and test")
+def _load_split_probabilities(artifact_dir: Path, split: str, threshold: float):
+    """sklearn probabilities recorded at training time, keyed by stable ID."""
+    probabilities = {}
+    with (artifact_dir / f"{split}_predictions.csv").open(newline="") as handle:
+        for row in csv.DictReader(handle):
+            probability = float(row["probability"])  # 17 significant digits: exact
+            if int(row["binary_prediction"]) != int(probability >= threshold):
+                raise RuntimeError(f"{split}: recorded decision disagrees with probability")
+            probabilities[row["stable_example_id"]] = probability
+    return probabilities
 
-    raw = np.asarray(clf.decision_function(X), dtype=np.float64)
-    probabilities = np.asarray(clf.predict_proba(X)[:, 1], dtype=np.float64)
-    manual = np.full(len(X), model["initial_raw_score"], dtype=np.float64)
-    for estimator in clf.estimators_[:, 0]:
-        manual += clf.learning_rate * estimator.predict(X).reshape(-1)
-    if not np.array_equal(raw, manual):
-        difference = float(np.max(np.abs(raw - manual)))
-        raise RuntimeError(f"manual raw-score formula differs by {difference}")
-    logistic = 1.0 / (1.0 + np.exp(-raw))
-    if not np.array_equal(probabilities, logistic):
-        difference = float(np.max(np.abs(probabilities - logistic)))
-        raise RuntimeError(f"logistic probability formula differs by {difference}")
 
-    schema_bytes = model["schema"]["schema_version"].encode("ascii")
+def render_parity_corpus(artifact_dir: Path) -> bytes:
+    metadata = json.loads((artifact_dir / "model_metadata.json").read_text())
+    schema = json.loads((artifact_dir / "feature_schema.json").read_text())
+    threshold = float(schema["threshold"])
+    hashes = metadata["artifact_file_hashes"]
+    for split in PARITY_SPLITS:
+        for name in (f"{split}_features.npz", f"{split}_predictions.csv"):
+            if _sha256(artifact_dir / name) != hashes[name]:
+                raise RuntimeError(f"artifact hash mismatch for {name}")
+
+    schema_bytes = schema["schema_version"].encode("ascii")
     if len(schema_bytes) >= 32:
-        raise RuntimeError("schema version does not fit corpus header")
-    output = bytearray(struct.pack(
-        "<8sIIII32s64s",
-        CORPUS_MAGIC,
-        CORPUS_VERSION,
-        X.shape[1],
-        len(validation_X),
-        len(test_X),
-        schema_bytes,
-        model["model_hash"].encode("ascii"),
-    ))
-    row_format = "<24s27fddB"
-    for example_id, features, score, probability in zip(
-        ids, X, raw, probabilities
-    ):
-        encoded_id = example_id.encode("ascii")
-        if len(encoded_id) != 24:
-            raise RuntimeError(f"unexpected stable ID: {example_id}")
-        decision = int(probability >= model["selected_threshold"])
-        output.extend(struct.pack(
-            row_format,
-            encoded_id,
-            *[float(value) for value in features],
-            float(score),
-            float(probability),
-            decision,
-        ))
-    return bytes(output)
+        raise RuntimeError("schema version does not fit the corpus header")
+    counts = []
+    rows = bytearray()
+    for split in PARITY_SPLITS:
+        X, ids = _load_split_features(artifact_dir, split, list(schema["feature_names"]))
+        probabilities = _load_split_probabilities(artifact_dir, split, threshold)
+        if set(probabilities) != set(ids.tolist()):
+            raise RuntimeError(f"{split}: features and predictions cover different IDs")
+        for example_id, features in zip(ids, X):
+            encoded_id = example_id.encode("ascii")
+            if len(encoded_id) != 24:
+                raise RuntimeError(f"unexpected stable ID: {example_id}")
+            probability = probabilities[example_id]
+            rows += struct.pack(
+                "<24s27fdB", encoded_id, *[float(v) for v in features], probability,
+                int(probability >= threshold),
+            )
+        counts.append(len(X))
+
+    model_hash = hashes["quality_gbt.joblib"].encode("ascii")
+    header = struct.pack(
+        "<8sIIII32s64sd", CORPUS_MAGIC, CORPUS_VERSION, 27, counts[0], counts[1],
+        schema_bytes, model_hash, threshold,
+    )
+    return header + bytes(rows)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--artifact-dir", type=Path, default=DEFAULT_ARTIFACT_DIR)
     parser.add_argument("--header", type=Path, default=DEFAULT_HEADER)
     parser.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
+    only = parser.add_mutually_exclusive_group()
+    only.add_argument("--header-only", action="store_true")
+    only.add_argument("--corpus-only", action="store_true")
     args = parser.parse_args()
-
     artifact_dir = args.artifact_dir.resolve()
-    model = _load_authoritative(artifact_dir)
-    header = _render_header(model)
-    corpus = _render_corpus(artifact_dir, model)
 
-    print("Planned generated outputs:")
-    print(f"  header: {_portable(args.header)}")
-    print(f"  corpus: {_portable(args.corpus)}")
-    args.header.parent.mkdir(parents=True, exist_ok=True)
-    args.corpus.parent.mkdir(parents=True, exist_ok=True)
-    args.header.write_text(header)
-    args.corpus.write_bytes(corpus)
-    print(f"Model SHA-256: {model['model_hash']}")
-    print(f"Trees: {model['clf'].estimators_.shape[0]}")
-    print(f"Nodes: {sum(tree.tree_.node_count for tree in model['clf'].estimators_[:, 0])}")
-    print(f"Parity examples: 3400")
+    if not args.corpus_only:
+        model = _load_authoritative(artifact_dir)
+        _verify_sklearn_formula(artifact_dir, model)
+        args.header.parent.mkdir(parents=True, exist_ok=True)
+        args.header.write_text(_render_header(model))
+        nodes = sum(tree.tree_.node_count for tree in model["clf"].estimators_[:, 0])
+        print(f"header: {_portable(args.header)} "
+              f"({model['clf'].estimators_.shape[0]} trees, {nodes} nodes)")
+
+    if not args.header_only:
+        corpus = render_parity_corpus(artifact_dir)
+        args.corpus.parent.mkdir(parents=True, exist_ok=True)
+        args.corpus.write_bytes(corpus)
+        print(f"corpus: {_portable(args.corpus)} ({len(corpus)} bytes)")
 
 
 if __name__ == "__main__":

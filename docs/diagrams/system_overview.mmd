@@ -1,0 +1,52 @@
+%% System context: two runtimes over one core library, and the offline model loop.
+flowchart LR
+    subgraph inputs[Inputs]
+        wav[(WAV file)]
+        pcm[/S16LE PCM stream<br/>mic, pipe, socket/]
+    end
+
+    subgraph runtime[C++ runtime]
+        direction TB
+        app1[audio_pipeline<br/><i>offline</i>]
+        app2[voice_command_stream<br/><i>streaming</i>]
+        subgraph core[edge_audio_core]
+            direction LR
+            audio[audio]
+            seg[segmentation]
+            quality[quality]
+            command[command]
+            report[report]
+        end
+        asr[edge_audio_asr<br/>AsrEngine]
+        whisper[[whisper.cpp<br/>CPU / CUDA]]
+        app1 --> core
+        app2 --> core
+        app1 --> asr
+        app2 --> asr
+        asr --> whisper
+    end
+
+    subgraph ml[Offline ML workflow · Python]
+        direction TB
+        data[(LibriSpeech · MUSAN<br/>DEMAND · RIRs)]
+        train[train_quality_model.py]
+        artifact[(artifacts/<br/>quality_model_v1)]
+        export[export_quality_model.py]
+        data --> train --> artifact --> export
+    end
+
+    wav --> app1
+    pcm --> app2
+    export -- "constexpr tree tables" --> quality
+    export -- "parity corpus" --> tests[[C++ parity test]]
+    app1 --> out1[/key=value lines<br/>+ JSON report/]
+    app2 --> out2[/JSON Lines<br/>command events/]
+
+    classDef ext fill:#f4f4f5,stroke:#71717a,color:#18181b
+    classDef app fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    classDef lib fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef py fill:#fef3c7,stroke:#d97706,color:#78350f
+    class wav,pcm,whisper,out1,out2,data ext
+    class app1,app2 app
+    class audio,seg,quality,command,report,asr lib
+    class train,artifact,export,tests py

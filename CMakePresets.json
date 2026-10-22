@@ -1,0 +1,35 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": { "EDGE_AUDIO_WERROR": "ON" }
+    },
+    { "name": "release", "inherits": "base", "displayName": "Release (CPU)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" } },
+    { "name": "debug", "inherits": "base", "displayName": "Debug (CPU)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } },
+    { "name": "asan", "inherits": "base", "displayName": "Debug + AddressSanitizer/UBSan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
+      } },
+    { "name": "cuda", "inherits": "base", "displayName": "Release (CUDA)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "GGML_CUDA": "ON" } }
+  ],
+  "buildPresets": [
+    { "name": "release", "configurePreset": "release" },
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "asan", "configurePreset": "asan" },
+    { "name": "cuda", "configurePreset": "cuda" }
+  ],
+  "testPresets": [
+    { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } },
+    { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true } },
+    { "name": "asan", "configurePreset": "asan", "output": { "outputOnFailure": true } }
+  ]
+}

@@ -1,0 +1,12 @@
+%% StreamingUtteranceSegmenter: one transition per 20 ms frame.
+stateDiagram-v2
+    direction LR
+    [*] --> IDLE
+    IDLE --> IDLE: silence · keep frame in pre-roll
+    IDLE --> SPEECH: N consecutive speech frames<br/>(prepend pre-roll)
+    SPEECH --> ENDING: silence frame
+    ENDING --> SPEECH: speech frame
+    SPEECH --> CLOSE: max duration · flush()
+    ENDING --> CLOSE: end silence · max duration · flush()
+    CLOSE --> IDLE: emit if speech ≥ min_speech_ms<br/>else discard
+    state CLOSE <<choice>>

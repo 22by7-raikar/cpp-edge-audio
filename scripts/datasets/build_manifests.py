@@ -20,9 +20,9 @@ RIRS includes: rir_type, room_id
 DEMAND includes: environment
 
 Usage:
-    conda run -n audio_king python scripts/datasets/build_manifests.py
-    conda run -n audio_king python scripts/datasets/build_manifests.py --datasets librispeech musan
-    conda run -n audio_king python scripts/datasets/build_manifests.py --validate
+    conda run -n edge-audio python scripts/datasets/build_manifests.py
+    conda run -n edge-audio python scripts/datasets/build_manifests.py --datasets librispeech musan
+    conda run -n edge-audio python scripts/datasets/build_manifests.py --validate
 """
 
 import argparse

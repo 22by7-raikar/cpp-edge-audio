@@ -1,0 +1,28 @@
+%% audio_pipeline: one complete WAV file.
+flowchart TD
+    load[load_wav<br/>downmix to mono] --> rs[resample to 16 kHz]
+    rs --> segm{segmentation}
+    segm -- fixed --> fc[chunk_audio<br/>5 s windows]
+    segm -- vad / vad-packed --> vad[run_vad<br/>pack_vad_segments]
+    fc --> loop
+    vad --> loop
+
+    subgraph loop[for each window]
+        direction TB
+        gate[evaluate_chunk<br/>12 metrics + PASS / BORDERLINE / FAIL]
+        scene[classify<br/>SILENCE · NOISE · MUSIC · SPEECH · MIXED]
+        adapt[AdaptiveController<br/>tighten gate in noise<br/>skip music / silence]
+        gate --> scene --> adapt
+        adapt -. next window's gate .-> gate
+    end
+
+    loop --> pol{policy}
+    pol -- rule --> perchunk[transcribe each<br/>admitted window]
+    pol -- learned / hybrid --> agg[QualityFeatureAggregator<br/>27 features] --> pred[predict_quality<br/>100-tree GBDT, ~1 µs]
+    pred --> decide[decide_quality_admission]
+    decide --> once[transcribe_if_admitted<br/>whole file, at most once]
+    perchunk --> log[RunLogger<br/>stdout lines + JSON report]
+    once --> log
+
+    classDef asr fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
+    class perchunk,once asr

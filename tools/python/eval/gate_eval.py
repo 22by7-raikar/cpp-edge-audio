@@ -5,12 +5,12 @@ Compute gate metrics for every file in a JSONL label file, simulate gate
 decisions using the current GateConfig defaults, and produce a baseline report.
 
 The gate logic is a Python mirror of:
-  runtime/cpp/src/gate/gate.cpp     (decision logic)
-  runtime/cpp/src/gate/features.cpp (FFT-based feature extraction)
+  src/edge_audio/quality/rule_gate.cpp          (decision logic)
+  src/edge_audio/quality/spectral_features.cpp  (FFT-based feature extraction)
 
 Feature computation uses numpy.fft and matches the C++ Cooley-Tukey radix-2 DIT
-implementation to within floating-point rounding error. Field names follow the
-JSON schema defined in .github/instructions/schema.instructions.md.
+implementation to within floating-point rounding error. Field names match the
+chunk records of the C++ RunLogger JSON report.
 
 File-level decision from chunks:
   any PASS              -> PASS
@@ -20,7 +20,7 @@ File-level decision from chunks:
 Usage:
     python tools/python/eval/gate_eval.py
     python tools/python/eval/gate_eval.py --labels data/labels/eval_subset.jsonl
-    python tools/python/eval/gate_eval.py --out benchmarks/results/gate_calibration/
+    python tools/python/eval/gate_eval.py --out results/gate_calibration/
     python tools/python/eval/gate_eval.py --chunk-sec 5.0
 """
 
@@ -55,7 +55,7 @@ def resolve_path(path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Default GateConfig — exact mirror of runtime/cpp/src/gate/gate.h defaults.
+# Default GateConfig — exact mirror of src/edge_audio/quality/rule_gate.h defaults.
 # Change these only when gate.h defaults change.
 # ---------------------------------------------------------------------------
 DEFAULT_CONFIG: Dict = {
@@ -609,7 +609,7 @@ def main() -> None:
     )
     ap.add_argument(
         "--out",
-        default="benchmarks/results/gate_calibration/",
+        default="results/gate_calibration/",
         help="Output directory for baseline JSON artifact",
     )
     ap.add_argument(
@@ -656,7 +656,7 @@ def main() -> None:
     report = build_report(file_records)
     print_report(report)
 
-    # Save calibration JSON — input for gate_calibrate.py
+    # Save the per-file baseline (features, gate decisions, summary) as JSON.
     ts       = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     out_path = os.path.join(args.out, f"baseline_{ts}.json")
 
@@ -676,7 +676,6 @@ def main() -> None:
         json.dump(artifact, fh, indent=2)
 
     print(f"Baseline artifact : {out_path}", file=sys.stderr)
-    print(f"Next step         : python tools/python/tuning/gate_calibrate.py {out_path}")
 
 
 if __name__ == "__main__":

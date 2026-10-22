@@ -6,7 +6,7 @@ and ASR smoke benchmarking.
 
 Requirements:
     conda env create -f environment.yml
-    conda run -n audio_king python scripts/datasets/build_eval_subset.py --seed 42 --overwrite
+    conda run -n edge-audio python scripts/datasets/build_eval_subset.py --seed 42 --overwrite
 
 Reads manifests from data/manifests/ (run build_manifests.py first).
 
