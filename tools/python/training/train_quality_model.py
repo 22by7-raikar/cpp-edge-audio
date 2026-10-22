@@ -24,7 +24,7 @@ Usage:
     python tools/python/training/train_quality_model.py \\
         --train-labels data/labels/quality_train.jsonl \\
         --labels       data/labels/eval_subset.jsonl \\
-        --out          benchmarks/results/quality_model/
+        --out          results/quality_model/
 """
 
 import argparse
@@ -69,13 +69,13 @@ try:
 except ImportError:
     print(
         "ERROR: scikit-learn not installed.\n"
-        "  conda install -n audio_king scikit-learn",
+        "  conda install -n edge-audio scikit-learn",
         file=sys.stderr,
     )
     sys.exit(1)
 
 DEFAULT_LABELS = "data/labels/eval_subset.jsonl"
-DEFAULT_OUT    = "benchmarks/results/quality_model/"
+DEFAULT_OUT    = "results/quality_model/"
 CHUNK_SEC      = 5.0
 TRAIN_FRAC     = 0.6
 SEED           = 42

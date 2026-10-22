@@ -1,0 +1,23 @@
+%% How one 5 s window becomes rule, scene and learned evidence, and how a policy combines them.
+flowchart LR
+    win[5 s window] --> td[time domain<br/>RMS · silence · clipping · ZCR]
+    win --> sp[spectral · Hann + radix-2 FFT<br/>flatness · centroid · rolloff · flux<br/>band energy low / mid / high · activity]
+    td --> m[(GateMetrics<br/>12 values)]
+    sp --> m
+
+    m --> gate[rule gate<br/>ordered checks]
+    m --> scene[scene classifier]
+    m --> agg[file aggregator<br/>mean · max · gate fractions]
+    gate --> agg
+    agg --> fv[(27 features)] --> gbdt[GBDT · 100 trees<br/>depth 3 · log-odds → p]
+
+    gate --> R{RULE<br/>any window not FAIL<br/>and not music/silence}
+    scene --> R
+    gbdt --> L{LEARNED<br/>p ≥ threshold}
+    R --> H{HYBRID<br/>RULE and LEARNED}
+    L --> H
+
+    classDef data fill:#f4f4f5,stroke:#71717a,color:#18181b
+    classDef pol fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    class m,fv data
+    class R,L,H pol

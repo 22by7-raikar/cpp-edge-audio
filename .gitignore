@@ -1,16 +1,15 @@
-# C++ build artifacts
-runtime/cpp/build/
-*.o
-*.a
-*.so
+# Build trees (CMake presets build into build/<preset>)
+build/
+docs/api/
 
-# Model files
+# Model weights and binaries (the parity corpus is a committed fixture)
 *.bin
 *.gguf
 *.pt
 *.onnx
+!tests/data/*.bin
 
-# Dataset directories — tracked by structure (.gitkeep) and symlinks, not content
+# Datasets: directory structure is tracked, contents are not
 data/raw/*
 !data/raw/.gitkeep
 data/external/*
@@ -19,38 +18,24 @@ data/processed/*
 !data/processed/.gitkeep
 data/tmp/*
 !data/tmp/.gitkeep
-# manifests and labels are small text files — commit them
-# but ignore auto-generated chunks
 data/manifests/chunks_*.tsv
 data/labels/auto_*.tsv
-
-# Legacy ignore (pre-restructure)
 data/*.wav
 data/*.flac
 
-# All generated C++ build trees
-runtime/cpp/build_tests/
-
-# Local repository archives and diagnostics
-cpp-edge-audio-src.tar.gz
-missing_paths.txt
-
-# Local agent prompts and workspace settings
-prompts/
-*.code-workspace
-
-# Benchmark results (keep configs, gitignore raw output logs)
-benchmarks/results/
+# Local run output
+results/
 
 # Python
 __pycache__/
 *.pyc
-*.pyo
 .venv/
-tools/python/edge_stt/
 
 # Editor / OS
 .DS_Store
-.vscode/settings.json
+.vscode/
+.idea/
 *.swp
-*.save
+*.code-workspace
+models/*
+!models/.gitkeep

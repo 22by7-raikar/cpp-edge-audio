@@ -1,0 +1,24 @@
+%% From public corpora to a compiled-in model with a parity guarantee.
+flowchart TB
+    subgraph train[1 · Train · Python]
+        direction LR
+        raw[(public corpora)] --> prep[prepare_stage1.py<br/>build_manifests.py]
+        prep --> split[build_quality_train.py<br/>disjoint splits + overlap checks]
+        split --> feat[gate_eval.py<br/>Python mirror of the C++ DSP]
+        feat --> fit[train_quality_model.py<br/>GBDT · threshold on validation]
+    end
+    fit --> art[(artifacts/quality_model_v1<br/>model · metrics · predictions · hashes)]
+    subgraph ship[2 · Export and verify]
+        direction LR
+        hdr[export --header-only<br/>needs recorded scikit-learn] --> h[[quality_model_data.h]]
+        corp[export --corpus-only<br/>NumPy only] --> c[[tests/data/quality_model_v1_parity.bin]]
+        h --> test["QualityModelParity<br/>3,400 identical decisions<br/>max probability error ≤ 1e-12"]
+        c --> test
+    end
+    art --> hdr
+    art --> corp
+
+    classDef py fill:#fef3c7,stroke:#d97706,color:#78350f
+    classDef cpp fill:#dcfce7,stroke:#16a34a,color:#14532d
+    class prep,split,feat,fit,hdr,corp py
+    class h,c,test cpp

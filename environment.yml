@@ -1,4 +1,4 @@
-name: audio_king
+name: edge-audio
 
 channels:
   - conda-forge

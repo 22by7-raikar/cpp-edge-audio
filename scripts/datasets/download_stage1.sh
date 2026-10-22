@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# download_stage1.sh
-# Download stage-1 datasets for audio ML evaluation.
+# Download the public corpora used to build the quality-model dataset.
 #
 # Datasets:
 #   librispeech   - dev-clean and test-clean (default); train-clean-100 if --full
 #   musan         - music, noise, speech (background noise source)
 #   demand        - diverse environments noise (background noise source)
 #   rirs_noises   - room impulse responses for reverberation
-#   tau2022       - TAU Urban Acoustic Scenes 2022 (placeholder; requires manual download)
 #
 # Modes:
 #   --lite  : dev-clean + MUSAN only (suitable for laptop, ~3 GB)
@@ -159,25 +157,8 @@ else
 fi
 
 # -------------------------------------------------------
-# TAU Urban Acoustic Scenes 2022 (placeholder)
-# Requires DCASE account; cannot be auto-downloaded.
-# -------------------------------------------------------
-TAU_DIR="$EXT_DIR/tau2022"
-mkdir -p "$TAU_DIR"
-
-echo ""
-echo "=== TAU Urban Acoustic Scenes 2022 (placeholder) ==="
-echo "  TODO: TAU2022 requires manual download."
-echo "  1. Register at https://zenodo.org/record/6337421"
-echo "  2. Download TAU-urban-acoustic-scenes-2022-mobile-development.audio.*.zip"
-echo "  3. Extract into: $TAU_DIR"
-record_provenance "tau2022" "development" \
-    "https://zenodo.org/record/6337421" \
-    "$TAU_DIR" "manual_required"
-
-# -------------------------------------------------------
 # Summary
 # -------------------------------------------------------
 echo ""
 echo "Download complete. Provenance: $PROV_FILE"
-echo "Next step: bash scripts/datasets/prepare_stage1.py --help"
+echo "Next step: python scripts/datasets/build_manifests.py --validate"
